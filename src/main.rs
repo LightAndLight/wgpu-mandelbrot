@@ -96,40 +96,6 @@ fn main() {
                 _ => {}
             },
             Event::RedrawRequested(window_id) if window_id == window.id() => {
-                /*
-                The following doesn't work because `surface_texture.texture` requires the COPY_DST usage.
-
-                But according to the [docs](https://docs.rs/wgpu/0.14.0/wgpu/struct.SurfaceConfiguration.html#structfield.usage),
-                the only valid usage is `RENDER_ATTACHMENT`.
-
-                queue.write_texture(
-                    wgpu::ImageCopyTexture {
-                        texture: &surface_texture.texture,
-                        mip_level: 0,
-                        origin: wgpu::Origin3d::ZERO,
-                        aspect: wgpu::TextureAspect::All,
-                    },
-                    &yellow_screen,
-                    wgpu::ImageDataLayout {
-                        offset: 0,
-                        bytes_per_row: NonZeroU32::new(4 * size.width),
-                        rows_per_image: NonZeroU32::new(size.height),
-                    },
-                    wgpu::Extent3d {
-                        width: size.width,
-                        height: size.height,
-                        depth_or_array_layers: 1,
-                    },
-                );
-                */
-
-                /*
-                How do I work with a `RENDER_ATTACHMENT` texture?
-
-                The [WebGPU reference](https://gpuweb.github.io/gpuweb/#programming-model-resource-usages) says that
-                `RENDER_ATTACHMENT` denotes a texture that's written to as an output of a render pass.
-                 */
-
                 let surface_texture = surface.get_current_texture().unwrap();
 
                 let surface_texture_view = surface_texture
