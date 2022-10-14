@@ -35,6 +35,8 @@
               
               pkgs.vulkan-validation-layers
               pkgs.vulkan-tools
+              
+              pkgs.renderdoc
             ];
 
             VK_INSTANCE_LAYERS = "VK_LAYER_KHRONOS_validation:VK_EXT_swapchain_colorspace";
