@@ -19,7 +19,6 @@ fn length_complex(value: Complex) -> f32 {
 }
 
 let ESCAPE_THRESHOLD: f32 = 2.0;
-let ITERATION_LIMIT: u32 = 30u;
 
 struct IterationCount{escaped : u32, value : u32}
 
@@ -52,6 +51,8 @@ on the screen, and sample the results texture for its color.
 // Center the image on `origin`,
 @group(0) @binding(3) var<uniform> origin : vec2<f32>;
 
+@group(0) @binding(4) var<uniform> iteration_limit : u32;
+
 @compute @workgroup_size(64)
 fn mandelbrot(@builtin(global_invocation_id) global_invocation_id: vec3<u32>) {
   let x = global_invocation_id.x;
@@ -74,7 +75,7 @@ fn mandelbrot(@builtin(global_invocation_id) global_invocation_id: vec3<u32>) {
       break;
     }
     
-    if iteration_count >= ITERATION_LIMIT {
+    if iteration_count >= iteration_limit {
       break;
     }
 

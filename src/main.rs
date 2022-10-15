@@ -93,6 +93,17 @@ fn main() {
                     },
                     count: None,
                 },
+                // iteration_limit
+                wgpu::BindGroupLayoutEntry {
+                    binding: 4,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
             ],
         });
 
@@ -133,6 +144,16 @@ fn main() {
                     visibility: wgpu::ShaderStages::FRAGMENT,
                     ty: wgpu::BindingType::Buffer {
                         ty: wgpu::BufferBindingType::Storage { read_only: true },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 2,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
                         has_dynamic_offset: false,
                         min_binding_size: None,
                     },
@@ -229,6 +250,13 @@ fn main() {
         usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::STORAGE,
     });
 
+    let iteration_limit: u32 = 30;
+    let iteration_limit_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        label: Some("iteration-count-buffer"),
+        contents: bytemuck::cast_slice(&[iteration_limit]),
+        usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::UNIFORM,
+    });
+
     let mut compute_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
         label: Some("compute-bind-group"),
         layout: &compute_bind_group_layout,
@@ -265,6 +293,14 @@ fn main() {
                     size: None,
                 }),
             },
+            wgpu::BindGroupEntry {
+                binding: 4,
+                resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
+                    buffer: &iteration_limit_buffer,
+                    offset: 0,
+                    size: None,
+                }),
+            },
         ],
     });
 
@@ -284,6 +320,14 @@ fn main() {
                 binding: 1,
                 resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
                     buffer: &iteration_count_buffer,
+                    offset: 0,
+                    size: None,
+                }),
+            },
+            wgpu::BindGroupEntry {
+                binding: 2,
+                resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
+                    buffer: &iteration_limit_buffer,
                     offset: 0,
                     size: None,
                 }),
@@ -418,6 +462,14 @@ fn main() {
                                     size: None,
                                 }),
                             },
+                            wgpu::BindGroupEntry {
+                                binding: 4,
+                                resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
+                                    buffer: &iteration_limit_buffer,
+                                    offset: 0,
+                                    size: None,
+                                }),
+                            },
                         ],
                     });
 
@@ -437,6 +489,14 @@ fn main() {
                                 binding: 1,
                                 resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
                                     buffer: &iteration_count_buffer,
+                                    offset: 0,
+                                    size: None,
+                                }),
+                            },
+                            wgpu::BindGroupEntry {
+                                binding: 2,
+                                resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
+                                    buffer: &iteration_limit_buffer,
                                     offset: 0,
                                     size: None,
                                 }),
