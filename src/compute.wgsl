@@ -103,13 +103,24 @@ fn mandelbrot(@builtin(global_invocation_id) global_invocation_id: vec3<u32>) {
   //   escaped == u32(1.0 - 1.0)
   //   escaped == u32(0.0)
   //   escaped == 0u
-  iteration_counts_out[index].escaped = u32(1.0 - sign(escape_threshold_minus_length_max_0));
+  let escaped = u32(1.0 - sign(escape_threshold_minus_length_max_0));
+  iteration_counts_out[index].escaped = escaped;
+  
+  iteration_counts_out[index].value =
+    iteration_counts_in[index].value +
+    // Add nothing when the point has already escaped,
+    // add 1 when the point hasn't escaped.
+    //
+    // iteration_counts_in[index].escaped == 0u implies
+    //   1u - iteration_counts_in[index].escaped == 1u
+    //
+    // iteration_counts_in[index].escaped == 1u implies
+    //   1u - iteration_counts_in[index].escaped == 0u
+    (1u - iteration_counts_in[index].escaped);
   
   if escape_threshold_minus_length_max_0 == 0.0 {
     starting_values_out[index] = starting_value;
-    iteration_counts_out[index].value = iteration_counts_in[index].value;
   } else {
     starting_values_out[index] = add_complex(multiply_complex(starting_value, starting_value), c);
-    iteration_counts_out[index].value = iteration_counts_in[index].value + 1u;
   }
 }
