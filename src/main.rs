@@ -56,10 +56,10 @@ fn main() {
                 wgpu::BindGroupLayoutEntry {
                     binding: 0,
                     visibility: wgpu::ShaderStages::COMPUTE,
-                    ty: wgpu::BindingType::StorageTexture {
-                        access: wgpu::StorageTextureAccess::WriteOnly,
-                        format: wgpu::TextureFormat::Rgba8Unorm,
-                        view_dimension: wgpu::TextureViewDimension::D2,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: false },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
                     },
                     count: None,
                 },
@@ -121,24 +121,18 @@ fn main() {
                 wgpu::BindGroupLayoutEntry {
                     binding: 0,
                     visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Texture {
-                        sample_type: wgpu::TextureSampleType::Float { filterable: false },
-                        view_dimension: wgpu::TextureViewDimension::D2,
-                        multisampled: false,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
                     },
                     count: None,
                 },
                 wgpu::BindGroupLayoutEntry {
                     binding: 1,
                     visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::NonFiltering),
-                    count: None,
-                },
-                wgpu::BindGroupLayoutEntry {
-                    binding: 2,
-                    visibility: wgpu::ShaderStages::FRAGMENT,
                     ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Uniform,
+                        ty: wgpu::BufferBindingType::Storage { read_only: true },
                         has_dynamic_offset: false,
                         min_binding_size: None,
                     },
@@ -184,26 +178,9 @@ fn main() {
         multiview: None,
     });
 
-    let mut result_texture = device.create_texture(&wgpu::TextureDescriptor {
-        label: Some("result-texture"),
-        size: wgpu::Extent3d {
-            width: size.width,
-            height: size.height,
-            depth_or_array_layers: 1,
-        },
-        mip_level_count: 1,
-        sample_count: 1,
-        dimension: wgpu::TextureDimension::D2,
-        format: wgpu::TextureFormat::Rgba8Unorm,
-        usage: wgpu::TextureUsages::STORAGE_BINDING | wgpu::TextureUsages::TEXTURE_BINDING,
-    });
-
-    let mut result_texture_view =
-        result_texture.create_view(&wgpu::TextureViewDescriptor::default());
-
     let screen_size_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
         label: Some("screen-size-buffer"),
-        contents: bytemuck::cast_slice(&[size.width as f32, size.height as f32]),
+        contents: bytemuck::cast_slice(&[size.width as u32, size.height as u32]),
         usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
     });
 
@@ -232,13 +209,37 @@ fn main() {
         usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
     });
 
+    #[repr(C)]
+    #[derive(Pod, Zeroable, Clone, Copy, Debug)]
+    struct IterationCount {
+        escaped: u32,
+        value: u32,
+    }
+
+    let iteration_count_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        label: Some("iteration-count-buffer"),
+        contents: bytemuck::cast_slice(
+            &std::iter::repeat(IterationCount {
+                escaped: 0,
+                value: 0,
+            })
+            .take((size.width * size.height) as usize)
+            .collect::<Vec<_>>(),
+        ),
+        usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::STORAGE,
+    });
+
     let mut compute_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
         label: Some("compute-bind-group"),
         layout: &compute_bind_group_layout,
         entries: &[
             wgpu::BindGroupEntry {
                 binding: 0,
-                resource: wgpu::BindingResource::TextureView(&result_texture_view),
+                resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
+                    buffer: &iteration_count_buffer,
+                    offset: 0,
+                    size: None,
+                }),
             },
             wgpu::BindGroupEntry {
                 binding: 1,
@@ -267,24 +268,22 @@ fn main() {
         ],
     });
 
-    let sampler = device.create_sampler(&wgpu::SamplerDescriptor::default());
-
     let mut render_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
         label: Some("render-bind-group"),
         layout: &render_pipeline.get_bind_group_layout(0),
         entries: &[
             wgpu::BindGroupEntry {
                 binding: 0,
-                resource: wgpu::BindingResource::TextureView(&result_texture_view),
+                resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
+                    buffer: &screen_size_buffer,
+                    offset: 0,
+                    size: None,
+                }),
             },
             wgpu::BindGroupEntry {
                 binding: 1,
-                resource: wgpu::BindingResource::Sampler(&sampler),
-            },
-            wgpu::BindGroupEntry {
-                binding: 2,
                 resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
-                    buffer: &screen_size_buffer,
+                    buffer: &iteration_count_buffer,
                     offset: 0,
                     size: None,
                 }),
@@ -295,17 +294,7 @@ fn main() {
     let mut cursor_position = Vec2 { x: 0.0, y: 0.0 };
 
     event_loop.run(move |event, _, control_flow| {
-        let (
-            result_texture,
-            result_texture_view,
-            compute_bind_group,
-            render_bind_group,
-            zoom,
-            origin,
-            cursor_position,
-        ) = (
-            &mut result_texture,
-            &mut result_texture_view,
+        let (compute_bind_group, render_bind_group, zoom, origin, cursor_position) = (
             &mut compute_bind_group,
             &mut render_bind_group,
             &mut zoom,
@@ -374,28 +363,23 @@ fn main() {
 
                     surface.configure(&device, &surface_configuration);
 
-                    *result_texture = device.create_texture(&wgpu::TextureDescriptor {
-                        label: Some("result-texture"),
-                        size: wgpu::Extent3d {
-                            width: size.width,
-                            height: size.height,
-                            depth_or_array_layers: 1,
-                        },
-                        mip_level_count: 1,
-                        sample_count: 1,
-                        dimension: wgpu::TextureDimension::D2,
-                        format: wgpu::TextureFormat::Rgba8Unorm,
-                        usage: wgpu::TextureUsages::STORAGE_BINDING
-                            | wgpu::TextureUsages::TEXTURE_BINDING,
-                    });
-
-                    *result_texture_view =
-                        result_texture.create_view(&wgpu::TextureViewDescriptor::default());
-
                     queue.write_buffer(
                         &screen_size_buffer,
                         0,
-                        bytemuck::cast_slice(&[size.width as f32, size.height as f32]),
+                        bytemuck::cast_slice(&[size.width as u32, size.height as u32]),
+                    );
+
+                    queue.write_buffer(
+                        &iteration_count_buffer,
+                        0,
+                        bytemuck::cast_slice(
+                            &std::iter::repeat(IterationCount {
+                                escaped: 0,
+                                value: 0,
+                            })
+                            .take((size.width * size.height) as usize)
+                            .collect::<Vec<_>>(),
+                        ),
                     );
 
                     *compute_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
@@ -404,7 +388,11 @@ fn main() {
                         entries: &[
                             wgpu::BindGroupEntry {
                                 binding: 0,
-                                resource: wgpu::BindingResource::TextureView(result_texture_view),
+                                resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
+                                    buffer: &iteration_count_buffer,
+                                    offset: 0,
+                                    size: None,
+                                }),
                             },
                             wgpu::BindGroupEntry {
                                 binding: 1,
@@ -439,16 +427,16 @@ fn main() {
                         entries: &[
                             wgpu::BindGroupEntry {
                                 binding: 0,
-                                resource: wgpu::BindingResource::TextureView(result_texture_view),
+                                resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
+                                    buffer: &screen_size_buffer,
+                                    offset: 0,
+                                    size: None,
+                                }),
                             },
                             wgpu::BindGroupEntry {
                                 binding: 1,
-                                resource: wgpu::BindingResource::Sampler(&sampler),
-                            },
-                            wgpu::BindGroupEntry {
-                                binding: 2,
                                 resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
-                                    buffer: &screen_size_buffer,
+                                    buffer: &iteration_count_buffer,
                                     offset: 0,
                                     size: None,
                                 }),

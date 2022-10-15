@@ -1,3 +1,28 @@
+struct Complex{real: f32, imaginary: f32}
+
+let ZERO_COMPLEX: Complex = Complex(0.0, 0.0);
+
+fn multiply_complex(first: Complex, second: Complex) -> Complex {
+  let a = first.real * second.real;
+  let b = first.real * second.imaginary + first.imaginary * second.real;
+  let c = first.imaginary * second.imaginary;
+
+  return Complex(a - c, b);
+}
+
+fn add_complex(first: Complex, second: Complex) -> Complex {
+  return Complex(first.real + second.real, first.imaginary + second.imaginary);
+}
+
+fn length_complex(value: Complex) -> f32 {
+  return sqrt(pow(value.real, 2.0) + pow(value.imaginary, 2.0));
+}
+
+let ESCAPE_THRESHOLD: f32 = 2.0;
+let ITERATION_LIMIT: u32 = 30u;
+
+struct IterationCount{escaped : u32, value : u32}
+
 /*
 From [Wikipedia](https://en.wikipedia.org/wiki/Mandelbrot_set)
 
@@ -17,46 +42,9 @@ We can run the iteration logic on a compute shader and store the resulting colou
 2D texture the size of the screen. We then make the fragment shader trigger for each pixel
 on the screen, and sample the results texture for its color.
 */
-@group(0) @binding(0) var results: texture_storage_2d<rgba8unorm, write>;
 
-let ESCAPE_THRESHOLD: f32 = 2.0;
-let ITERATION_LIMIT: u32 = 30u;
-
-struct Complex{real: f32, imaginary: f32}
-
-fn multiply_complex(first: Complex, second: Complex) -> Complex {
-  let a = first.real * second.real;
-  let b = first.real * second.imaginary + first.imaginary * second.real;
-  let c = first.imaginary * second.imaginary;
-
-  return Complex(a - c, b);
-}
-
-fn add_complex(first: Complex, second: Complex) -> Complex {
-  return Complex(first.real + second.real, first.imaginary + second.imaginary);
-}
-
-fn length_complex(value: Complex) -> f32 {
-  return sqrt(pow(value.real, 2.0) + pow(value.imaginary, 2.0));
-}
-
-let ZERO_COMPLEX: Complex = Complex(0.0, 0.0);
-
-fn iteration_count_color(iteration_count: u32) -> vec4<f32> {
-  let iteration_limit = f32(ITERATION_LIMIT);
-  let iteration_count = f32(iteration_count);
-  
-  return vec4<f32>(
-    //    2*(x - 0.5)^2 + 0.5
-    1.0 - 2.0 * pow((iteration_count / iteration_limit - 0.5), 2.0) + 0.5,
-    iteration_count / iteration_limit,
-    0.0, // iteration_count / iteration_limit,
-    1.0
-  );
-}
-
-
-@group(0) @binding(1) var<uniform> screen_size : vec2<f32>;
+@group(0) @binding(0) var<storage, read_write> results: array<IterationCount>;
+@group(0) @binding(1) var<uniform> screen_size : vec2<u32>;
 
 // View the set from `(-(2 / zoom), -(2 / zoom))` to `(2 / zoom, 2 / zoom)`
 @group(0) @binding(2) var<uniform> zoom : f32;
@@ -66,59 +54,38 @@ fn iteration_count_color(iteration_count: u32) -> vec4<f32> {
 
 @compute @workgroup_size(64)
 fn mandelbrot(@builtin(global_invocation_id) global_invocation_id: vec3<u32>) {
+  let x = global_invocation_id.x;
+  let y = global_invocation_id.y;
+  
   let zoom_inv = 2.0 / zoom;
   
-  var z = ZERO_COMPLEX;
   var c = Complex(
-    2.0 * zoom_inv * f32(global_invocation_id.x) / screen_size.x - zoom_inv + origin.x,  
-    2.0 * zoom_inv * f32(global_invocation_id.y) / screen_size.y - zoom_inv + origin.y
+    2.0 * zoom_inv * f32(x) / f32(screen_size.x) - zoom_inv + origin.x,  
+    2.0 * zoom_inv * f32(y) / f32(screen_size.y) - zoom_inv + origin.y
   );
 
+  var iteration_result = ZERO_COMPLEX;
   var iteration_count: u32 = 0u;
   
-  var hit_iteration_limit = false;
+  var escaped = false;
   loop {
-    if length_complex(z) >= ESCAPE_THRESHOLD {
+    if length_complex(iteration_result) >= ESCAPE_THRESHOLD {
+      escaped = true;
       break;
     }
     
     if iteration_count >= ITERATION_LIMIT {
-      hit_iteration_limit = true;
       break;
     }
 
-    z = add_complex(multiply_complex(z, z), c);
+    iteration_result = add_complex(multiply_complex(iteration_result, iteration_result), c);
     iteration_count++;
   }
-  
-  /* no early bailout
-  var loop_count: u32 = 0u;
-  loop {
-    if loop_count >= ITERATION_LIMIT {
-      break;
-    } else {
-      if length_complex(z) < ESCAPE_THRESHOLD {
-        z = add_complex(multiply_complex(z, z), c);
-        iteration_count++;
-      }
-      loop_count++;
-    }
-  }
-  */
 
-  // doesn't work
-  // let coords: vec2<u32> = vec2<u32>(global_invocation_id.x, global_invocation_id.y);
-  
-  let coords: vec2<i32> = vec2<i32>(i32(global_invocation_id.x), i32(global_invocation_id.y));
-  
-  var value: vec4<f32>;
-  // no early bailout
-  // if loop_count == iteration_count 
-  if hit_iteration_limit {
-    value = vec4<f32>(0.0, 0.0, 0.0, 1.0); 
+  let index = y * screen_size.x + x;
+  if escaped {
+    results[index] = IterationCount(1u, iteration_count);
   } else {
-    value = iteration_count_color(iteration_count);
-  };
-  
-  textureStore(results, coords, value)
+    results[index] = IterationCount(0u, iteration_count);
+  }
 }
