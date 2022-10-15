@@ -14,18 +14,19 @@ struct IterationCount{escaped : u32, value : u32}
 
 @group(0) @binding(0) var<uniform> screen_size : vec2<u32>;
 @group(0) @binding(1) var<storage, read> iteration_counts : array<IterationCount>;
-@group(0) @binding(2) var<uniform> iteration_limit : u32;
+
+@group(1) @binding(0) var<uniform> total_iterations : u32;
 
 fn iteration_count_color(iteration_count : IterationCount) -> vec4<f32> {
   if iteration_count.escaped == 1u {
-    let iteration_limit = f32(iteration_limit);
+    let total_iterations = f32(total_iterations);
     let iteration_count = f32(iteration_count.value);
 
     return vec4<f32>(
       //    2*(x - 0.5)^2 + 0.5
-      1.0 - 2.0 * pow((iteration_count / iteration_limit - 0.5), 2.0) + 0.5,
-      iteration_count / iteration_limit,
-      0.0, // iteration_count / iteration_limit,
+      1.0 - 2.0 * pow((iteration_count / total_iterations - 0.5), 2.0) + 0.5,
+      iteration_count / total_iterations,
+      0.0, // iteration_count / total_iterations,
       1.0
     );
   } else {

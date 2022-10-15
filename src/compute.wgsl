@@ -51,8 +51,8 @@ on the screen, and sample the results texture for its color.
 // Center the image on `origin`,
 @group(0) @binding(3) var<uniform> origin : vec2<f32>;
 
-@group(0) @binding(4) var<uniform> iteration_limit : u32;
-@group(0) @binding(5) var<storage, read_write> starting_values : array<Complex>;
+@group(1) @binding(0) var<storage, read> starting_values_in : array<Complex>;
+@group(1) @binding(1) var<storage, read_write> starting_values_out : array<Complex>;
 
 @compute @workgroup_size(64)
 fn mandelbrot(@builtin(global_invocation_id) global_invocation_id: vec3<u32>) {
@@ -67,12 +67,12 @@ fn mandelbrot(@builtin(global_invocation_id) global_invocation_id: vec3<u32>) {
   );
 
   let index = y * screen_size.x + x;
-  var starting_value : Complex = starting_values[index];
+  var starting_value : Complex = starting_values_in[index];
 
   if length_complex(starting_value) >= ESCAPE_THRESHOLD {
     iteration_counts[index].escaped = 1u;
   } else {
-    starting_values[index] = add_complex(multiply_complex(starting_value, starting_value), c);
+    starting_values_out[index] = add_complex(multiply_complex(starting_value, starting_value), c);
     iteration_counts[index].value++;
   }
 }

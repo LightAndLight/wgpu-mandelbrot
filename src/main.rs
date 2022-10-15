@@ -49,9 +49,9 @@ fn main() {
         source: wgpu::ShaderSource::Wgsl(include_str!("compute.wgsl").into()),
     });
 
-    let compute_bind_group_layout =
+    let compute_bind_group_layout_1 =
         device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            label: Some("compute-bind-group-layout"),
+            label: Some("compute-bind-group-layout-1"),
             entries: &[
                 wgpu::BindGroupLayoutEntry {
                     binding: 0,
@@ -93,20 +93,27 @@ fn main() {
                     },
                     count: None,
                 },
-                // iteration_limit
+            ],
+        });
+
+    let compute_bind_group_layout_2 =
+        device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("compute-bind-group-layout-2"),
+            entries: &[
+                // starting_values_in
                 wgpu::BindGroupLayoutEntry {
-                    binding: 4,
+                    binding: 0,
                     visibility: wgpu::ShaderStages::COMPUTE,
                     ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Uniform,
+                        ty: wgpu::BufferBindingType::Storage { read_only: true },
                         has_dynamic_offset: false,
                         min_binding_size: None,
                     },
                     count: None,
                 },
-                // starting_values
+                // starting_values_out
                 wgpu::BindGroupLayoutEntry {
-                    binding: 5,
+                    binding: 1,
                     visibility: wgpu::ShaderStages::COMPUTE,
                     ty: wgpu::BindingType::Buffer {
                         ty: wgpu::BufferBindingType::Storage { read_only: false },
@@ -120,7 +127,7 @@ fn main() {
 
     let compute_pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
         label: Some("compute-pipeline-layout"),
-        bind_group_layouts: &[&compute_bind_group_layout],
+        bind_group_layouts: &[&compute_bind_group_layout_1, &compute_bind_group_layout_2],
         push_constant_ranges: &[],
     });
 
@@ -136,7 +143,7 @@ fn main() {
         source: wgpu::ShaderSource::Wgsl(include_str!("shader.wgsl").into()),
     });
 
-    let render_bind_group_layout =
+    let render_bind_group_layout_1 =
         device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("render-bind-group-layout"),
             entries: &[
@@ -160,22 +167,27 @@ fn main() {
                     },
                     count: None,
                 },
-                wgpu::BindGroupLayoutEntry {
-                    binding: 2,
-                    visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Uniform,
-                        has_dynamic_offset: false,
-                        min_binding_size: None,
-                    },
-                    count: None,
-                },
             ],
+        });
+
+    let render_bind_group_layout_2 =
+        device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("render-bind-group-layout-2"),
+            entries: &[wgpu::BindGroupLayoutEntry {
+                binding: 0,
+                visibility: wgpu::ShaderStages::FRAGMENT,
+                ty: wgpu::BindingType::Buffer {
+                    ty: wgpu::BufferBindingType::Uniform,
+                    has_dynamic_offset: false,
+                    min_binding_size: None,
+                },
+                count: None,
+            }],
         });
 
     let render_pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
         label: Some("render-pipeline-layout"),
-        bind_group_layouts: &[&render_bind_group_layout],
+        bind_group_layouts: &[&render_bind_group_layout_1, &render_bind_group_layout_2],
         push_constant_ranges: &[],
     });
 
@@ -261,10 +273,9 @@ fn main() {
         usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::STORAGE,
     });
 
-    let iteration_limit: u32 = 30;
-    let iteration_limit_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-        label: Some("iteration-limit-buffer"),
-        contents: bytemuck::cast_slice(&[iteration_limit]),
+    let total_iterations_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        label: Some("total-iterations-buffer"),
+        contents: bytemuck::cast_slice(&[0_u32]),
         usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::UNIFORM,
     });
 
@@ -275,22 +286,37 @@ fn main() {
         imaginary: f32,
     }
 
-    let mut starting_values_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-        label: Some("starting-values-buffer"),
-        contents: bytemuck::cast_slice(
-            &std::iter::repeat(Complex {
-                real: 0.0,
-                imaginary: 0.0,
-            })
-            .take((size.width * size.height) as usize)
-            .collect::<Vec<_>>(),
-        ),
-        usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::STORAGE,
-    });
+    let mut starting_values_in_buffer =
+        device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("starting-values-in_buffer"),
+            contents: bytemuck::cast_slice(
+                &std::iter::repeat(Complex {
+                    real: 0.0,
+                    imaginary: 0.0,
+                })
+                .take((size.width * size.height) as usize)
+                .collect::<Vec<_>>(),
+            ),
+            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::STORAGE,
+        });
 
-    let mut compute_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-        label: Some("compute-bind-group"),
-        layout: &compute_bind_group_layout,
+    let mut starting_values_out_buffer =
+        device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("starting-values-out-buffer"),
+            contents: bytemuck::cast_slice(
+                &std::iter::repeat(Complex {
+                    real: 0.0,
+                    imaginary: 0.0,
+                })
+                .take((size.width * size.height) as usize)
+                .collect::<Vec<_>>(),
+            ),
+            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::STORAGE,
+        });
+
+    let mut compute_bind_group_1 = device.create_bind_group(&wgpu::BindGroupDescriptor {
+        label: Some("compute-bind-group-1"),
+        layout: &compute_bind_group_layout_1,
         entries: &[
             wgpu::BindGroupEntry {
                 binding: 0,
@@ -324,26 +350,10 @@ fn main() {
                     size: None,
                 }),
             },
-            wgpu::BindGroupEntry {
-                binding: 4,
-                resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
-                    buffer: &iteration_limit_buffer,
-                    offset: 0,
-                    size: None,
-                }),
-            },
-            wgpu::BindGroupEntry {
-                binding: 5,
-                resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
-                    buffer: &starting_values_buffer,
-                    offset: 0,
-                    size: None,
-                }),
-            },
         ],
     });
 
-    let mut render_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+    let mut render_bind_group_1 = device.create_bind_group(&wgpu::BindGroupDescriptor {
         label: Some("render-bind-group"),
         layout: &render_pipeline.get_bind_group_layout(0),
         entries: &[
@@ -363,36 +373,31 @@ fn main() {
                     size: None,
                 }),
             },
-            wgpu::BindGroupEntry {
-                binding: 2,
-                resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
-                    buffer: &iteration_limit_buffer,
-                    offset: 0,
-                    size: None,
-                }),
-            },
         ],
     });
 
     let mut cursor_position = Vec2 { x: 0.0, y: 0.0 };
+    let mut current_iteration_count = 0;
 
     event_loop.run(move |event, _, control_flow| {
         let (
-            compute_bind_group,
-            render_bind_group,
+            compute_bind_group_1,
+            render_bind_group_1,
             zoom,
             origin,
             cursor_position,
             iteration_count_buffer,
-            starting_values_buffer,
+            starting_values_in_buffer,
+            starting_values_out_buffer,
         ) = (
-            &mut compute_bind_group,
-            &mut render_bind_group,
+            &mut compute_bind_group_1,
+            &mut render_bind_group_1,
             &mut zoom,
             &mut origin,
             &mut cursor_position,
             &mut iteration_count_buffer,
-            &mut starting_values_buffer,
+            &mut starting_values_in_buffer,
+            &mut starting_values_out_buffer,
         );
 
         // To present frames in realtime, *don't* set `control_flow` to `Wait`.
@@ -435,6 +440,44 @@ fn main() {
                     };
                     debug!("origin set to {:?}", origin);
                     queue.write_buffer(&origin_buffer, 0, bytemuck::cast_slice(&[*origin]));
+                    queue.write_buffer(
+                        starting_values_in_buffer,
+                        0,
+                        bytemuck::cast_slice(
+                            &std::iter::repeat(Complex {
+                                real: 0.0,
+                                imaginary: 0.0,
+                            })
+                            .take((size.width * size.height) as usize)
+                            .collect::<Vec<_>>(),
+                        ),
+                    );
+                    queue.write_buffer(
+                        starting_values_out_buffer,
+                        0,
+                        bytemuck::cast_slice(
+                            &std::iter::repeat(Complex {
+                                real: 0.0,
+                                imaginary: 0.0,
+                            })
+                            .take((size.width * size.height) as usize)
+                            .collect::<Vec<_>>(),
+                        ),
+                    );
+                    queue.write_buffer(
+                        iteration_count_buffer,
+                        0,
+                        bytemuck::cast_slice(
+                            &std::iter::repeat(IterationCount {
+                                escaped: 0,
+                                value: 0,
+                            })
+                            .take((size.width * size.height) as usize)
+                            .collect::<Vec<_>>(),
+                        ),
+                    );
+                    current_iteration_count = 0;
+                    queue.write_buffer(&total_iterations_buffer, 0, bytemuck::cast_slice(&[0_u32]));
                 }
                 WindowEvent::MouseWheel { delta, .. } => {
                     *zoom += *zoom
@@ -447,6 +490,44 @@ fn main() {
                         };
 
                     queue.write_buffer(&zoom_buffer, 0, bytemuck::cast_slice(&[*zoom]));
+                    queue.write_buffer(
+                        starting_values_in_buffer,
+                        0,
+                        bytemuck::cast_slice(
+                            &std::iter::repeat(Complex {
+                                real: 0.0,
+                                imaginary: 0.0,
+                            })
+                            .take((size.width * size.height) as usize)
+                            .collect::<Vec<_>>(),
+                        ),
+                    );
+                    queue.write_buffer(
+                        starting_values_out_buffer,
+                        0,
+                        bytemuck::cast_slice(
+                            &std::iter::repeat(Complex {
+                                real: 0.0,
+                                imaginary: 0.0,
+                            })
+                            .take((size.width * size.height) as usize)
+                            .collect::<Vec<_>>(),
+                        ),
+                    );
+                    queue.write_buffer(
+                        iteration_count_buffer,
+                        0,
+                        bytemuck::cast_slice(
+                            &std::iter::repeat(IterationCount {
+                                escaped: 0,
+                                value: 0,
+                            })
+                            .take((size.width * size.height) as usize)
+                            .collect::<Vec<_>>(),
+                        ),
+                    );
+                    current_iteration_count = 0;
+                    queue.write_buffer(&total_iterations_buffer, 0, bytemuck::cast_slice(&[0_u32]));
                 }
                 WindowEvent::Resized(size) => {
                     debug!("resizing to {:?}", size);
@@ -474,13 +555,15 @@ fn main() {
                                 .take((size.width * size.height) as usize)
                                 .collect::<Vec<_>>(),
                             ),
-                            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::STORAGE,
+                            usage: wgpu::BufferUsages::COPY_DST
+                                | wgpu::BufferUsages::UNIFORM
+                                | wgpu::BufferUsages::STORAGE,
                         });
 
-                    starting_values_buffer.destroy();
-                    *starting_values_buffer =
+                    starting_values_in_buffer.destroy();
+                    *starting_values_in_buffer =
                         device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                            label: Some("starting_values"),
+                            label: Some("starting_values_in"),
                             contents: bytemuck::cast_slice(
                                 &std::iter::repeat(Complex {
                                     real: 0.0,
@@ -489,12 +572,29 @@ fn main() {
                                 .take((size.width * size.height) as usize)
                                 .collect::<Vec<_>>(),
                             ),
-                            usage: wgpu::BufferUsages::STORAGE,
+                            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::STORAGE,
                         });
 
-                    *compute_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+                    starting_values_out_buffer.destroy();
+                    *starting_values_out_buffer =
+                        device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                            label: Some("starting_values_out"),
+                            contents: bytemuck::cast_slice(
+                                &std::iter::repeat(Complex {
+                                    real: 0.0,
+                                    imaginary: 0.0,
+                                })
+                                .take((size.width * size.height) as usize)
+                                .collect::<Vec<_>>(),
+                            ),
+                            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::STORAGE,
+                        });
+                    current_iteration_count = 0;
+                    queue.write_buffer(&total_iterations_buffer, 0, bytemuck::cast_slice(&[0_u32]));
+
+                    *compute_bind_group_1 = device.create_bind_group(&wgpu::BindGroupDescriptor {
                         label: Some("compute-bind-group"),
-                        layout: &compute_bind_group_layout,
+                        layout: &compute_bind_group_layout_1,
                         entries: &[
                             wgpu::BindGroupEntry {
                                 binding: 0,
@@ -528,26 +628,10 @@ fn main() {
                                     size: None,
                                 }),
                             },
-                            wgpu::BindGroupEntry {
-                                binding: 4,
-                                resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
-                                    buffer: &iteration_limit_buffer,
-                                    offset: 0,
-                                    size: None,
-                                }),
-                            },
-                            wgpu::BindGroupEntry {
-                                binding: 5,
-                                resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
-                                    buffer: starting_values_buffer,
-                                    offset: 0,
-                                    size: None,
-                                }),
-                            },
                         ],
                     });
 
-                    *render_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+                    *render_bind_group_1 = device.create_bind_group(&wgpu::BindGroupDescriptor {
                         label: Some("render-bind-group"),
                         layout: &render_pipeline.get_bind_group_layout(0),
                         entries: &[
@@ -567,14 +651,6 @@ fn main() {
                                     size: None,
                                 }),
                             },
-                            wgpu::BindGroupEntry {
-                                binding: 2,
-                                resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
-                                    buffer: &iteration_limit_buffer,
-                                    offset: 0,
-                                    size: None,
-                                }),
-                            },
                         ],
                     });
 
@@ -583,11 +659,53 @@ fn main() {
                 _ => {}
             },
             Event::RedrawRequested(window_id) if window_id == window.id() => {
+                queue.write_buffer(
+                    &total_iterations_buffer,
+                    0,
+                    bytemuck::cast_slice(&[current_iteration_count]),
+                );
+
                 let surface_texture = surface.get_current_texture().unwrap();
 
                 let surface_texture_view = surface_texture
                     .texture
                     .create_view(&wgpu::TextureViewDescriptor::default());
+
+                let compute_bind_group_2 = device.create_bind_group(&wgpu::BindGroupDescriptor {
+                    label: Some("compute-bind-group-2"),
+                    layout: &compute_bind_group_layout_2,
+                    entries: &[
+                        wgpu::BindGroupEntry {
+                            binding: 0,
+                            resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
+                                buffer: starting_values_in_buffer,
+                                offset: 0,
+                                size: None,
+                            }),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 1,
+                            resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
+                                buffer: starting_values_out_buffer,
+                                offset: 0,
+                                size: None,
+                            }),
+                        },
+                    ],
+                });
+
+                let render_bind_group_2 = device.create_bind_group(&wgpu::BindGroupDescriptor {
+                    label: Some("render-bind-group-2"),
+                    layout: &render_pipeline.get_bind_group_layout(1),
+                    entries: &[wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
+                            buffer: &total_iterations_buffer,
+                            offset: 0,
+                            size: None,
+                        }),
+                    }],
+                });
 
                 let command_encoder = {
                     let mut command_encoder =
@@ -601,7 +719,10 @@ fn main() {
                             });
 
                         compute_pass.set_pipeline(&compute_pipeline);
-                        compute_pass.set_bind_group(0, compute_bind_group, &[]);
+
+                        compute_pass.set_bind_group(0, compute_bind_group_1, &[]);
+                        compute_pass.set_bind_group(1, &compute_bind_group_2, &[]);
+
                         compute_pass.insert_debug_marker("mandelbrot");
                         compute_pass.dispatch_workgroups(size.width, size.height, 1);
                     }
@@ -629,7 +750,8 @@ fn main() {
                             });
 
                         render_pass.set_pipeline(&render_pipeline);
-                        render_pass.set_bind_group(0, render_bind_group, &[]);
+                        render_pass.set_bind_group(0, render_bind_group_1, &[]);
+                        render_pass.set_bind_group(1, &render_bind_group_2, &[]);
                         render_pass.draw(0..4, 0..1);
                     }
                     command_encoder.pop_debug_group();
@@ -639,6 +761,9 @@ fn main() {
 
                 queue.submit([command_encoder.finish()]);
                 surface_texture.present();
+
+                std::mem::swap(starting_values_in_buffer, starting_values_out_buffer);
+                current_iteration_count += 1;
             }
             _ => {}
         }
