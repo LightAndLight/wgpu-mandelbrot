@@ -1,3 +1,4 @@
+use bytemuck::{Pod, Zeroable};
 use log::debug;
 use wgpu::util::DeviceExt;
 use winit::{
@@ -64,6 +65,26 @@ fn main() {
                 },
                 wgpu::BindGroupLayoutEntry {
                     binding: 1,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 2,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 3,
                     visibility: wgpu::ShaderStages::COMPUTE,
                     ty: wgpu::BindingType::Buffer {
                         ty: wgpu::BufferBindingType::Uniform,
@@ -186,6 +207,31 @@ fn main() {
         usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
     });
 
+    let mut zoom: f32 = 1.0;
+    let zoom_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        label: Some("zoom-buffer"),
+        contents: bytemuck::cast_slice(&[zoom]),
+        usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+    });
+
+    #[repr(C)]
+    #[derive(Pod, Zeroable, Clone, Copy, Debug)]
+    struct Vec2 {
+        x: f32,
+        y: f32,
+    }
+    let mut origin: Vec2 = Vec2 {
+        x: 0.3654609,
+        y: 0.36276495,
+    };
+    // Vec2 { x: 0.0, y: 0.0 };
+
+    let origin_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        label: Some("origin-buffer"),
+        contents: bytemuck::cast_slice(&[origin]),
+        usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+    });
+
     let mut compute_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
         label: Some("compute-bind-group"),
         layout: &compute_bind_group_layout,
@@ -198,6 +244,22 @@ fn main() {
                 binding: 1,
                 resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
                     buffer: &screen_size_buffer,
+                    offset: 0,
+                    size: None,
+                }),
+            },
+            wgpu::BindGroupEntry {
+                binding: 2,
+                resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
+                    buffer: &zoom_buffer,
+                    offset: 0,
+                    size: None,
+                }),
+            },
+            wgpu::BindGroupEntry {
+                binding: 3,
+                resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
+                    buffer: &origin_buffer,
                     offset: 0,
                     size: None,
                 }),
@@ -230,12 +292,25 @@ fn main() {
         ],
     });
 
+    let mut cursor_position = Vec2 { x: 0.0, y: 0.0 };
+
     event_loop.run(move |event, _, control_flow| {
-        let (result_texture, result_texture_view, compute_bind_group, render_bind_group) = (
+        let (
+            result_texture,
+            result_texture_view,
+            compute_bind_group,
+            render_bind_group,
+            zoom,
+            origin,
+            cursor_position,
+        ) = (
             &mut result_texture,
             &mut result_texture_view,
             &mut compute_bind_group,
             &mut render_bind_group,
+            &mut zoom,
+            &mut origin,
+            &mut cursor_position,
         );
 
         // To present frames in realtime, *don't* set `control_flow` to `Wait`.
@@ -248,6 +323,48 @@ fn main() {
             Event::WindowEvent { window_id, event } if window_id == window.id() => match event {
                 WindowEvent::CloseRequested => {
                     *control_flow = ControlFlow::Exit;
+                }
+                WindowEvent::CursorMoved { position, .. } => {
+                    cursor_position.x = position.x as f32;
+                    cursor_position.y = position.y as f32;
+                }
+                WindowEvent::MouseInput {
+                    state: winit::event::ElementState::Pressed,
+                    button: winit::event::MouseButton::Left,
+                    ..
+                } => {
+                    debug!("mouse pressed at {:?}", *cursor_position);
+
+                    /*
+                    when `zoom = 1.0`, we're viewing (-2, -2) to (2, 2).
+
+                    (0, 0) corresponds to (size.width / 2, size.height / 2)
+
+                    A click at (cursor_x, cursor_y) corresponds to (4 * cursor_x / size.width - 2, 4 * cursor_y / size.height - 2)
+                     */
+
+                    let zoom_inv = 2.0 / *zoom;
+                    *origin = Vec2 {
+                        x: origin.x
+                            + (2.0 * zoom_inv * cursor_position.x / (size.width as f32) - zoom_inv),
+                        y: origin.y
+                            + (2.0 * zoom_inv * cursor_position.y / (size.height as f32)
+                                - zoom_inv),
+                    };
+                    debug!("origin set to {:?}", origin);
+                    queue.write_buffer(&origin_buffer, 0, bytemuck::cast_slice(&[*origin]));
+                }
+                WindowEvent::MouseWheel { delta, .. } => {
+                    *zoom += *zoom
+                        * 0.1
+                        * match delta {
+                            winit::event::MouseScrollDelta::LineDelta(_, delta) => delta,
+                            winit::event::MouseScrollDelta::PixelDelta(_) => {
+                                panic!("expected LineDelta, got PixelDelta")
+                            }
+                        };
+
+                    queue.write_buffer(&zoom_buffer, 0, bytemuck::cast_slice(&[*zoom]));
                 }
                 WindowEvent::Resized(size) => {
                     debug!("resizing to {:?}", size);
@@ -293,6 +410,22 @@ fn main() {
                                 binding: 1,
                                 resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
                                     buffer: &screen_size_buffer,
+                                    offset: 0,
+                                    size: None,
+                                }),
+                            },
+                            wgpu::BindGroupEntry {
+                                binding: 2,
+                                resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
+                                    buffer: &zoom_buffer,
+                                    offset: 0,
+                                    size: None,
+                                }),
+                            },
+                            wgpu::BindGroupEntry {
+                                binding: 3,
+                                resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
+                                    buffer: &origin_buffer,
                                     offset: 0,
                                     size: None,
                                 }),

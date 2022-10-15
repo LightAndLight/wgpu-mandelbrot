@@ -20,7 +20,7 @@ on the screen, and sample the results texture for its color.
 @group(0) @binding(0) var results: texture_storage_2d<rgba8unorm, write>;
 
 let ESCAPE_THRESHOLD: f32 = 2.0;
-let ITERATION_LIMIT: u32 = 80u;
+let ITERATION_LIMIT: u32 = 30u;
 
 struct Complex{real: f32, imaginary: f32}
 
@@ -55,25 +55,27 @@ fn iteration_count_color(iteration_count: u32) -> vec4<f32> {
   );
 }
 
-// View the set from `(-(2 / ZOOM), -(2 / ZOOM))` to `(2 / ZOOM, 2 / ZOOM)`
-let ZOOM = 1.0;
-
-// Center the image on `ORIGIN`,
-let ORIGIN = vec2<f32>(0.42, 0.22);
 
 @group(0) @binding(1) var<uniform> screen_size : vec2<f32>;
 
+// View the set from `(-(2 / zoom), -(2 / zoom))` to `(2 / zoom, 2 / zoom)`
+@group(0) @binding(2) var<uniform> zoom : f32;
+
+// Center the image on `origin`,
+@group(0) @binding(3) var<uniform> origin : vec2<f32>;
+
 @compute @workgroup_size(64)
 fn mandelbrot(@builtin(global_invocation_id) global_invocation_id: vec3<u32>) {
+  let zoom_inv = 2.0 / zoom;
+  
   var z = ZERO_COMPLEX;
-  let zoom_inv = 2.0 / ZOOM;
   var c = Complex(
-    2.0 * zoom_inv * f32(global_invocation_id.x) / screen_size.x - zoom_inv + ORIGIN.x,  
-    2.0 * zoom_inv * f32(global_invocation_id.y) / screen_size.y - zoom_inv + ORIGIN.y
+    2.0 * zoom_inv * f32(global_invocation_id.x) / screen_size.x - zoom_inv + origin.x,  
+    2.0 * zoom_inv * f32(global_invocation_id.y) / screen_size.y - zoom_inv + origin.y
   );
 
   var iteration_count: u32 = 0u;
-
+  
   var hit_iteration_limit = false;
   loop {
     if length_complex(z) >= ESCAPE_THRESHOLD {
@@ -88,6 +90,21 @@ fn mandelbrot(@builtin(global_invocation_id) global_invocation_id: vec3<u32>) {
     z = add_complex(multiply_complex(z, z), c);
     iteration_count++;
   }
+  
+  /* no early bailout
+  var loop_count: u32 = 0u;
+  loop {
+    if loop_count >= ITERATION_LIMIT {
+      break;
+    } else {
+      if length_complex(z) < ESCAPE_THRESHOLD {
+        z = add_complex(multiply_complex(z, z), c);
+        iteration_count++;
+      }
+      loop_count++;
+    }
+  }
+  */
 
   // doesn't work
   // let coords: vec2<u32> = vec2<u32>(global_invocation_id.x, global_invocation_id.y);
@@ -95,6 +112,8 @@ fn mandelbrot(@builtin(global_invocation_id) global_invocation_id: vec3<u32>) {
   let coords: vec2<i32> = vec2<i32>(i32(global_invocation_id.x), i32(global_invocation_id.y));
   
   var value: vec4<f32>;
+  // no early bailout
+  // if loop_count == iteration_count 
   if hit_iteration_limit {
     value = vec4<f32>(0.0, 0.0, 0.0, 1.0); 
   } else {
