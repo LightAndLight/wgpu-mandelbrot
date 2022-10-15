@@ -27,7 +27,7 @@ From [Wikipedia](https://en.wikipedia.org/wiki/Mandelbrot_set)
 
 > The Mandelbrot set is the set of complex numbers `c` for which the function `f_c( z ) = z^2 + c`
 > does not diverge to infinity when iterated from `z = 0`, i.e., for which the sequence `f_c(0)`,
-> `f_c(f_c(0))`, etc., remains bounded in absolute value. 
+> `f_c(f_c(0))`, etc., remains bounded in absolute value.
 
 We treat each complex number `c = a + bi` as a pixel with coordinates `(a, b)`.
 
@@ -42,7 +42,7 @@ We can run the iteration logic on a compute shader and store the resulting colou
 on the screen, and sample the results texture for its color.
 */
 
-@group(0) @binding(0) var<storage, read_write> results: array<IterationCount>;
+@group(0) @binding(0) var<storage, read_write> iteration_counts: array<IterationCount>;
 @group(0) @binding(1) var<uniform> screen_size : vec2<u32>;
 
 // View the set from `(-(2 / zoom), -(2 / zoom))` to `(2 / zoom, 2 / zoom)`
@@ -52,29 +52,31 @@ on the screen, and sample the results texture for its color.
 @group(0) @binding(3) var<uniform> origin : vec2<f32>;
 
 @group(0) @binding(4) var<uniform> iteration_limit : u32;
+@group(0) @binding(5) var<storage, read_write> starting_values : array<Complex>;
 
 @compute @workgroup_size(64)
 fn mandelbrot(@builtin(global_invocation_id) global_invocation_id: vec3<u32>) {
   let x = global_invocation_id.x;
   let y = global_invocation_id.y;
-  
+
   let zoom_inv = 2.0 / zoom;
-  
+
   var c = Complex(
-    2.0 * zoom_inv * f32(x) / f32(screen_size.x) - zoom_inv + origin.x,  
+    2.0 * zoom_inv * f32(x) / f32(screen_size.x) - zoom_inv + origin.x,
     2.0 * zoom_inv * f32(y) / f32(screen_size.y) - zoom_inv + origin.y
   );
 
-  var iteration_result = ZERO_COMPLEX;
+  let index = y * screen_size.x + x;
+  var iteration_result : Complex = starting_values[index];
   var iteration_count: u32 = 0u;
-  
+
   var escaped = false;
   loop {
     if length_complex(iteration_result) >= ESCAPE_THRESHOLD {
       escaped = true;
       break;
     }
-    
+
     if iteration_count >= iteration_limit {
       break;
     }
@@ -83,10 +85,10 @@ fn mandelbrot(@builtin(global_invocation_id) global_invocation_id: vec3<u32>) {
     iteration_count++;
   }
 
-  let index = y * screen_size.x + x;
+  starting_values[index] = iteration_result;
   if escaped {
-    results[index] = IterationCount(1u, iteration_count);
+    iteration_counts[index] = IterationCount(1u, iteration_counts[index].value + iteration_count);
   } else {
-    results[index] = IterationCount(0u, iteration_count);
+    iteration_counts[index] = IterationCount(0u, iteration_counts[index].value + iteration_count);
   }
 }

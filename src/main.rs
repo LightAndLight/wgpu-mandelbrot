@@ -104,6 +104,17 @@ fn main() {
                     },
                     count: None,
                 },
+                // starting_values
+                wgpu::BindGroupLayoutEntry {
+                    binding: 5,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: false },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
             ],
         });
 
@@ -237,7 +248,7 @@ fn main() {
         value: u32,
     }
 
-    let iteration_count_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+    let mut iteration_count_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
         label: Some("iteration-count-buffer"),
         contents: bytemuck::cast_slice(
             &std::iter::repeat(IterationCount {
@@ -252,9 +263,29 @@ fn main() {
 
     let iteration_limit: u32 = 30;
     let iteration_limit_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-        label: Some("iteration-count-buffer"),
+        label: Some("iteration-limit-buffer"),
         contents: bytemuck::cast_slice(&[iteration_limit]),
         usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::UNIFORM,
+    });
+
+    #[repr(C)]
+    #[derive(Pod, Zeroable, Clone, Copy)]
+    struct Complex {
+        real: f32,
+        imaginary: f32,
+    }
+
+    let mut starting_values_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        label: Some("starting-values-buffer"),
+        contents: bytemuck::cast_slice(
+            &std::iter::repeat(Complex {
+                real: 0.0,
+                imaginary: 0.0,
+            })
+            .take((size.width * size.height) as usize)
+            .collect::<Vec<_>>(),
+        ),
+        usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::STORAGE,
     });
 
     let mut compute_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
@@ -301,6 +332,14 @@ fn main() {
                     size: None,
                 }),
             },
+            wgpu::BindGroupEntry {
+                binding: 5,
+                resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
+                    buffer: &starting_values_buffer,
+                    offset: 0,
+                    size: None,
+                }),
+            },
         ],
     });
 
@@ -338,12 +377,22 @@ fn main() {
     let mut cursor_position = Vec2 { x: 0.0, y: 0.0 };
 
     event_loop.run(move |event, _, control_flow| {
-        let (compute_bind_group, render_bind_group, zoom, origin, cursor_position) = (
+        let (
+            compute_bind_group,
+            render_bind_group,
+            zoom,
+            origin,
+            cursor_position,
+            iteration_count_buffer,
+            starting_values_buffer,
+        ) = (
             &mut compute_bind_group,
             &mut render_bind_group,
             &mut zoom,
             &mut origin,
             &mut cursor_position,
+            &mut iteration_count_buffer,
+            &mut starting_values_buffer,
         );
 
         // To present frames in realtime, *don't* set `control_flow` to `Wait`.
@@ -413,18 +462,35 @@ fn main() {
                         bytemuck::cast_slice(&[size.width as u32, size.height as u32]),
                     );
 
-                    queue.write_buffer(
-                        &iteration_count_buffer,
-                        0,
-                        bytemuck::cast_slice(
-                            &std::iter::repeat(IterationCount {
-                                escaped: 0,
-                                value: 0,
-                            })
-                            .take((size.width * size.height) as usize)
-                            .collect::<Vec<_>>(),
-                        ),
-                    );
+                    iteration_count_buffer.destroy();
+                    *iteration_count_buffer =
+                        device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                            label: Some("iteration_counts"),
+                            contents: bytemuck::cast_slice(
+                                &std::iter::repeat(IterationCount {
+                                    escaped: 0,
+                                    value: 0,
+                                })
+                                .take((size.width * size.height) as usize)
+                                .collect::<Vec<_>>(),
+                            ),
+                            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::STORAGE,
+                        });
+
+                    starting_values_buffer.destroy();
+                    *starting_values_buffer =
+                        device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                            label: Some("starting_values"),
+                            contents: bytemuck::cast_slice(
+                                &std::iter::repeat(Complex {
+                                    real: 0.0,
+                                    imaginary: 0.0,
+                                })
+                                .take((size.width * size.height) as usize)
+                                .collect::<Vec<_>>(),
+                            ),
+                            usage: wgpu::BufferUsages::STORAGE,
+                        });
 
                     *compute_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
                         label: Some("compute-bind-group"),
@@ -433,7 +499,7 @@ fn main() {
                             wgpu::BindGroupEntry {
                                 binding: 0,
                                 resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
-                                    buffer: &iteration_count_buffer,
+                                    buffer: iteration_count_buffer,
                                     offset: 0,
                                     size: None,
                                 }),
@@ -470,6 +536,14 @@ fn main() {
                                     size: None,
                                 }),
                             },
+                            wgpu::BindGroupEntry {
+                                binding: 5,
+                                resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
+                                    buffer: starting_values_buffer,
+                                    offset: 0,
+                                    size: None,
+                                }),
+                            },
                         ],
                     });
 
@@ -488,7 +562,7 @@ fn main() {
                             wgpu::BindGroupEntry {
                                 binding: 1,
                                 resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
-                                    buffer: &iteration_count_buffer,
+                                    buffer: iteration_count_buffer,
                                     offset: 0,
                                     size: None,
                                 }),
