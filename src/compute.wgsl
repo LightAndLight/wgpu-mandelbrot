@@ -70,13 +70,46 @@ fn mandelbrot(@builtin(global_invocation_id) global_invocation_id: vec3<u32>) {
   let index = y * screen_size.x + x;
   var starting_value : Complex = starting_values_in[index];
 
-  if length_complex(starting_value) >= ESCAPE_THRESHOLD {
+  /*
+  conditions:
+
+  length_complex(starting_value) > ESCAPE_THRESHOLD implies xx < 0
+  length_complex(starting_value) == ESCAPE_THRESHOLD implies xx == 0
+  length_complex(starting_value) < ESCAPE_THRESHOLD implies xx > 0
+  
+  length_complex(starting_value) >= ESCAPE_THRESHOLD implies xx <= 0
+  */
+  let escape_threshold_minus_length = ESCAPE_THRESHOLD - length_complex(starting_value);
+
+  // length_complex(starting_value) >= ESCAPE_THRESHOLD implies max(xx, 0.0) == 0
+  //
+  // If `escape_threshold_minus_length` is negative, then `max` outputs `0.0`.
+  let escape_threshold_minus_length_max_0 = max(escape_threshold_minus_length, 0.0);
+    
+  // escape_threshold_minus_length_max_0 == 0.0 should imply iteration_counts_out[index].escaped == 1u;
+  // escape_threshold_minus_length_max_0 > 0.0 should imply iteration_counts_out[index].escaped == 0u;
+  //
+  // escape_threshold_minus_length_max_0 == 0.0 implies sign(escape_threshold_minus_length_max_0) == 0.0
+  // escape_threshold_minus_length_max_0 > 0.0 implies sign(escape_threshold_minus_length_max_0) == 1.0
+  //
+  // escaped == u32(1.0 - sign(escape_threshold_minus_length_max_0))
+  //
+  // escape_threshold_minus_length_max_0 == 0.0 implies
+  //   escaped == u32(1.0 - 0.0)
+  //   escaped == u32(1.0)
+  //   escaped == 1u
+  //
+  // escape_threshold_minus_length_max_0 > 0.0 implies
+  //   escaped == u32(1.0 - 1.0)
+  //   escaped == u32(0.0)
+  //   escaped == 0u
+  iteration_counts_out[index].escaped = u32(1.0 - sign(escape_threshold_minus_length_max_0));
+  
+  if escape_threshold_minus_length_max_0 == 0.0 {
     starting_values_out[index] = starting_value;
-    iteration_counts_out[index].escaped = 1u;
     iteration_counts_out[index].value = iteration_counts_in[index].value;
   } else {
     starting_values_out[index] = add_complex(multiply_complex(starting_value, starting_value), c);
-    iteration_counts_out[index].escaped = 0u;
     iteration_counts_out[index].value = iteration_counts_in[index].value + 1u;
   }
 }
