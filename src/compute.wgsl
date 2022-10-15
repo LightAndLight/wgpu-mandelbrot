@@ -67,28 +67,12 @@ fn mandelbrot(@builtin(global_invocation_id) global_invocation_id: vec3<u32>) {
   );
 
   let index = y * screen_size.x + x;
-  var iteration_result : Complex = starting_values[index];
-  var iteration_count: u32 = 0u;
+  var starting_value : Complex = starting_values[index];
 
-  var escaped = false;
-  loop {
-    if length_complex(iteration_result) >= ESCAPE_THRESHOLD {
-      escaped = true;
-      break;
-    }
-
-    if iteration_count >= iteration_limit {
-      break;
-    }
-
-    iteration_result = add_complex(multiply_complex(iteration_result, iteration_result), c);
-    iteration_count++;
-  }
-
-  starting_values[index] = iteration_result;
-  if escaped {
-    iteration_counts[index] = IterationCount(1u, iteration_counts[index].value + iteration_count);
+  if length_complex(starting_value) >= ESCAPE_THRESHOLD {
+    iteration_counts[index].escaped = 1u;
   } else {
-    iteration_counts[index] = IterationCount(0u, iteration_counts[index].value + iteration_count);
+    starting_values[index] = add_complex(multiply_complex(starting_value, starting_value), c);
+    iteration_counts[index].value++;
   }
 }
