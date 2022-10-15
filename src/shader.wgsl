@@ -22,6 +22,18 @@ fn iteration_count_color(iteration_count : IterationCount) -> vec4<f32> {
     let total_iterations = f32(total_iterations);
     let iteration_count = f32(iteration_count.value);
 
+    let initial_r = 15.0 / 255.0;
+    let initial_g = 66.0 / 255.0;
+    let initial_b = 7.0 / 255.0;
+    let final_rgb = 180.0 / 255.0;
+    return vec4<f32>(
+      pow(initial_r + (1.0 - initial_r) * iteration_count / total_iterations, 2.2),
+      pow(initial_g + (1.0 - initial_g) * iteration_count / total_iterations, 2.2),
+      pow(initial_b + (1.0 - initial_b) * iteration_count / total_iterations, 2.2),
+      1.0
+    );
+
+    /*
     return vec4<f32>(
       //    2*(x - 0.5)^2 + 0.5
       1.0 - 2.0 * pow((iteration_count / total_iterations - 0.5), 2.0) + 0.5,
@@ -29,8 +41,22 @@ fn iteration_count_color(iteration_count : IterationCount) -> vec4<f32> {
       0.0, // iteration_count / total_iterations,
       1.0
     );
+    */
   } else {
-    return vec4<f32>(0.0, 0.0, 0.0, 0.0);
+    return vec4<f32>(
+      pow(15.0 / 255.0, 2.2),
+      pow(66.0 / 255.0, 2.2),
+      pow(7.0 / 255.0, 2.2),
+      1.0
+    );
+    /*
+    return vec4<f32>(
+      0.0, 
+      0.0, 
+      0.0, 
+      1.0
+    );
+    */
   }
 }
 

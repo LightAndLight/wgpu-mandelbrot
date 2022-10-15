@@ -313,16 +313,18 @@ fn main() {
         imaginary: f32,
     }
 
+    let starting_value = Complex {
+        real: 0.0,
+        imaginary: 0.0,
+    };
+
     let mut starting_values_in_buffer =
         device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("starting-values-in_buffer"),
             contents: bytemuck::cast_slice(
-                &std::iter::repeat(Complex {
-                    real: 0.0,
-                    imaginary: 0.0,
-                })
-                .take((size.width * size.height) as usize)
-                .collect::<Vec<_>>(),
+                &std::iter::repeat(starting_value)
+                    .take((size.width * size.height) as usize)
+                    .collect::<Vec<_>>(),
             ),
             usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::STORAGE,
         });
@@ -331,12 +333,9 @@ fn main() {
         device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("starting-values-out-buffer"),
             contents: bytemuck::cast_slice(
-                &std::iter::repeat(Complex {
-                    real: 0.0,
-                    imaginary: 0.0,
-                })
-                .take((size.width * size.height) as usize)
-                .collect::<Vec<_>>(),
+                &std::iter::repeat(starting_value)
+                    .take((size.width * size.height) as usize)
+                    .collect::<Vec<_>>(),
             ),
             usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::STORAGE,
         });
@@ -387,6 +386,8 @@ fn main() {
 
     let mut cursor_position = Vec2 { x: 0.0, y: 0.0 };
     let mut current_iteration_count = 0;
+    let mut zoom_changed = false;
+    let mut origin_changed = false;
 
     event_loop.run(move |event, _, control_flow| {
         let (
@@ -450,57 +451,8 @@ fn main() {
                                 - zoom_inv),
                     };
                     debug!("origin set to {:?}", origin);
+                    origin_changed = true;
                     queue.write_buffer(&origin_buffer, 0, bytemuck::cast_slice(&[*origin]));
-                    queue.write_buffer(
-                        starting_values_in_buffer,
-                        0,
-                        bytemuck::cast_slice(
-                            &std::iter::repeat(Complex {
-                                real: 0.0,
-                                imaginary: 0.0,
-                            })
-                            .take((size.width * size.height) as usize)
-                            .collect::<Vec<_>>(),
-                        ),
-                    );
-                    queue.write_buffer(
-                        starting_values_out_buffer,
-                        0,
-                        bytemuck::cast_slice(
-                            &std::iter::repeat(Complex {
-                                real: 0.0,
-                                imaginary: 0.0,
-                            })
-                            .take((size.width * size.height) as usize)
-                            .collect::<Vec<_>>(),
-                        ),
-                    );
-                    queue.write_buffer(
-                        iteration_counts_in_buffer,
-                        0,
-                        bytemuck::cast_slice(
-                            &std::iter::repeat(IterationCount {
-                                escaped: 0,
-                                value: 0,
-                            })
-                            .take((size.width * size.height) as usize)
-                            .collect::<Vec<_>>(),
-                        ),
-                    );
-                    queue.write_buffer(
-                        iteration_counts_out_buffer,
-                        0,
-                        bytemuck::cast_slice(
-                            &std::iter::repeat(IterationCount {
-                                escaped: 0,
-                                value: 0,
-                            })
-                            .take((size.width * size.height) as usize)
-                            .collect::<Vec<_>>(),
-                        ),
-                    );
-                    current_iteration_count = 0;
-                    queue.write_buffer(&total_iterations_buffer, 0, bytemuck::cast_slice(&[0_u32]));
                 }
                 WindowEvent::MouseWheel { delta, .. } => {
                     *zoom += *zoom
@@ -511,58 +463,8 @@ fn main() {
                                 panic!("expected LineDelta, got PixelDelta")
                             }
                         };
-
+                    zoom_changed = true;
                     queue.write_buffer(&zoom_buffer, 0, bytemuck::cast_slice(&[*zoom]));
-                    queue.write_buffer(
-                        starting_values_in_buffer,
-                        0,
-                        bytemuck::cast_slice(
-                            &std::iter::repeat(Complex {
-                                real: 0.0,
-                                imaginary: 0.0,
-                            })
-                            .take((size.width * size.height) as usize)
-                            .collect::<Vec<_>>(),
-                        ),
-                    );
-                    queue.write_buffer(
-                        starting_values_out_buffer,
-                        0,
-                        bytemuck::cast_slice(
-                            &std::iter::repeat(Complex {
-                                real: 0.0,
-                                imaginary: 0.0,
-                            })
-                            .take((size.width * size.height) as usize)
-                            .collect::<Vec<_>>(),
-                        ),
-                    );
-                    queue.write_buffer(
-                        iteration_counts_in_buffer,
-                        0,
-                        bytemuck::cast_slice(
-                            &std::iter::repeat(IterationCount {
-                                escaped: 0,
-                                value: 0,
-                            })
-                            .take((size.width * size.height) as usize)
-                            .collect::<Vec<_>>(),
-                        ),
-                    );
-                    queue.write_buffer(
-                        iteration_counts_out_buffer,
-                        0,
-                        bytemuck::cast_slice(
-                            &std::iter::repeat(IterationCount {
-                                escaped: 0,
-                                value: 0,
-                            })
-                            .take((size.width * size.height) as usize)
-                            .collect::<Vec<_>>(),
-                        ),
-                    );
-                    current_iteration_count = 0;
-                    queue.write_buffer(&total_iterations_buffer, 0, bytemuck::cast_slice(&[0_u32]));
                 }
                 WindowEvent::Resized(size) => {
                     debug!("resizing to {:?}", size);
@@ -617,12 +519,9 @@ fn main() {
                         device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
                             label: Some("starting_values_in"),
                             contents: bytemuck::cast_slice(
-                                &std::iter::repeat(Complex {
-                                    real: 0.0,
-                                    imaginary: 0.0,
-                                })
-                                .take((size.width * size.height) as usize)
-                                .collect::<Vec<_>>(),
+                                &std::iter::repeat(starting_value)
+                                    .take((size.width * size.height) as usize)
+                                    .collect::<Vec<_>>(),
                             ),
                             usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::STORAGE,
                         });
@@ -632,12 +531,9 @@ fn main() {
                         device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
                             label: Some("starting_values_out"),
                             contents: bytemuck::cast_slice(
-                                &std::iter::repeat(Complex {
-                                    real: 0.0,
-                                    imaginary: 0.0,
-                                })
-                                .take((size.width * size.height) as usize)
-                                .collect::<Vec<_>>(),
+                                &std::iter::repeat(starting_value)
+                                    .take((size.width * size.height) as usize)
+                                    .collect::<Vec<_>>(),
                             ),
                             usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::STORAGE,
                         });
@@ -693,6 +589,57 @@ fn main() {
                 _ => {}
             },
             Event::RedrawRequested(window_id) if window_id == window.id() => {
+                let reset_buffers = zoom_changed || origin_changed;
+                zoom_changed = false;
+                origin_changed = false;
+
+                if reset_buffers {
+                    queue.write_buffer(
+                        starting_values_in_buffer,
+                        0,
+                        bytemuck::cast_slice(
+                            &std::iter::repeat(starting_value)
+                                .take((size.width * size.height) as usize)
+                                .collect::<Vec<_>>(),
+                        ),
+                    );
+                    queue.write_buffer(
+                        starting_values_out_buffer,
+                        0,
+                        bytemuck::cast_slice(
+                            &std::iter::repeat(starting_value)
+                                .take((size.width * size.height) as usize)
+                                .collect::<Vec<_>>(),
+                        ),
+                    );
+                    queue.write_buffer(
+                        iteration_counts_in_buffer,
+                        0,
+                        bytemuck::cast_slice(
+                            &std::iter::repeat(IterationCount {
+                                escaped: 0,
+                                value: 0,
+                            })
+                            .take((size.width * size.height) as usize)
+                            .collect::<Vec<_>>(),
+                        ),
+                    );
+                    queue.write_buffer(
+                        iteration_counts_out_buffer,
+                        0,
+                        bytemuck::cast_slice(
+                            &std::iter::repeat(IterationCount {
+                                escaped: 0,
+                                value: 0,
+                            })
+                            .take((size.width * size.height) as usize)
+                            .collect::<Vec<_>>(),
+                        ),
+                    );
+                    current_iteration_count = 0;
+                    queue.write_buffer(&total_iterations_buffer, 0, bytemuck::cast_slice(&[0_u32]));
+                }
+
                 queue.write_buffer(
                     &total_iterations_buffer,
                     0,
