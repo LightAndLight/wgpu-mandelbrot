@@ -13,9 +13,9 @@ fn vertex_main(@builtin(vertex_index) index : u32) -> @builtin(position) vec4<f3
 struct IterationCount{escaped : u32, value : u32}
 
 @group(0) @binding(0) var<uniform> screen_size : vec2<u32>;
-@group(0) @binding(1) var<storage, read> iteration_counts : array<IterationCount>;
 
 @group(1) @binding(0) var<uniform> total_iterations : u32;
+@group(1) @binding(1) var<storage, read> iteration_counts : array<IterationCount>;
 
 fn iteration_count_color(iteration_count : IterationCount) -> vec4<f32> {
   if iteration_count.escaped == 1u {

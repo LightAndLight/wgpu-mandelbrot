@@ -42,17 +42,18 @@ We can run the iteration logic on a compute shader and store the resulting colou
 on the screen, and sample the results texture for its color.
 */
 
-@group(0) @binding(0) var<storage, read_write> iteration_counts: array<IterationCount>;
-@group(0) @binding(1) var<uniform> screen_size : vec2<u32>;
+@group(0) @binding(0) var<uniform> screen_size : vec2<u32>;
 
 // View the set from `(-(2 / zoom), -(2 / zoom))` to `(2 / zoom, 2 / zoom)`
-@group(0) @binding(2) var<uniform> zoom : f32;
+@group(0) @binding(1) var<uniform> zoom : f32;
 
 // Center the image on `origin`,
-@group(0) @binding(3) var<uniform> origin : vec2<f32>;
+@group(0) @binding(2) var<uniform> origin : vec2<f32>;
 
 @group(1) @binding(0) var<storage, read> starting_values_in : array<Complex>;
 @group(1) @binding(1) var<storage, read_write> starting_values_out : array<Complex>;
+@group(1) @binding(2) var<storage, read> iteration_counts_in : array<IterationCount>;
+@group(1) @binding(3) var<storage, read_write> iteration_counts_out : array<IterationCount>;
 
 @compute @workgroup_size(64)
 fn mandelbrot(@builtin(global_invocation_id) global_invocation_id: vec3<u32>) {
@@ -70,9 +71,12 @@ fn mandelbrot(@builtin(global_invocation_id) global_invocation_id: vec3<u32>) {
   var starting_value : Complex = starting_values_in[index];
 
   if length_complex(starting_value) >= ESCAPE_THRESHOLD {
-    iteration_counts[index].escaped = 1u;
+    starting_values_out[index] = starting_value;
+    iteration_counts_out[index].escaped = 1u;
+    iteration_counts_out[index].value = iteration_counts_in[index].value;
   } else {
     starting_values_out[index] = add_complex(multiply_complex(starting_value, starting_value), c);
-    iteration_counts[index].value++;
+    iteration_counts_out[index].escaped = 0u;
+    iteration_counts_out[index].value = iteration_counts_in[index].value + 1u;
   }
 }
