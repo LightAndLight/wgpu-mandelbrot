@@ -117,10 +117,28 @@ fn mandelbrot(@builtin(global_invocation_id) global_invocation_id: vec3<u32>) {
     // iteration_counts_in[index].escaped == 1u implies
     //   1u - iteration_counts_in[index].escaped == 0u
     (1u - iteration_counts_in[index].escaped);
-  
-  if escape_threshold_minus_length_max_0 == 0.0 {
-    starting_values_out[index] = starting_value;
-  } else {
-    starting_values_out[index] = add_complex(multiply_complex(starting_value, starting_value), c);
-  }
+    
+  starting_values_out[index] =
+    // set to `starting_value` when the point has escaped.
+    // set to `add_complex(multiply_complex(starting_value, starting_value), c)`
+    add_complex(
+      // escaped == 1u implies
+      //   multiply_complex(Complex(1.0, 0.0), starting_value),
+      //   starting_value,
+      //
+      // escaped == 0u implies
+      //   multiply_complex(Complex(0.0, 0.0), starting_value),
+      //   Complex(0.0, 0.0),
+      multiply_complex(Complex(f32(escaped), 0.0), starting_value),
+      // escaped == 1u implies
+      //   multiply_complex(Complex(1.0 - 1.0, 0.0), add_complex(multiply_complex(starting_value, starting_value), c))
+      //   multiply_complex(Complex(0.0, 0.0), add_complex(multiply_complex(starting_value, starting_value), c))
+      //   Complex(0.0, 0.0)
+      //
+      // escaped == 0u implies
+      //   multiply_complex(Complex(1.0 - 0.0, 0.0), add_complex(multiply_complex(starting_value, starting_value), c))
+      //   multiply_complex(Complex(1.0, 0.0), add_complex(multiply_complex(starting_value, starting_value), c))
+      //   add_complex(multiply_complex(starting_value, starting_value), c)
+      multiply_complex(Complex(1.0 - f32(escaped), 0.0), add_complex(multiply_complex(starting_value, starting_value), c))
+    );
 }
