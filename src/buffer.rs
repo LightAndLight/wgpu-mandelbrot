@@ -37,7 +37,7 @@ impl<'a, A: bytemuck::Pod + bytemuck::Zeroable> Builder<'a, A> {
         Self {
             label: None,
             contents: bytemuck::cast_slice(contents),
-            usage: wgpu::BufferUsages::empty(),
+            usage: wgpu::BufferUsages::COPY_DST,
             phantom_data: PhantomData,
         }
     }

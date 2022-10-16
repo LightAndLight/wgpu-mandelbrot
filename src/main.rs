@@ -248,13 +248,13 @@ fn main() {
         height: size.height as u32,
     })
     .with_label("screen-size-buffer")
-    .with_usage(wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST)
+    .with_usage(wgpu::BufferUsages::UNIFORM)
     .create(&device);
 
     let mut zoom: f32 = 1.0;
     let zoom_buffer = var::Builder::new(zoom)
         .with_label("zoom-buffer")
-        .with_usage(wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST)
+        .with_usage(wgpu::BufferUsages::UNIFORM)
         .create(&device);
 
     #[repr(C)]
@@ -271,7 +271,7 @@ fn main() {
 
     let origin_buffer = var::Builder::new(origin)
         .with_label("origin-buffer")
-        .with_usage(wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST)
+        .with_usage(wgpu::BufferUsages::UNIFORM)
         .create(&device);
 
     #[repr(C)]
@@ -290,25 +290,17 @@ fn main() {
 
     let mut iteration_counts_in_buffer = buffer::Builder::new(&initial_iteration_counts)
         .with_label("iteration-counts-buffer-1")
-        .with_usage(
-            wgpu::BufferUsages::COPY_DST
-                | wgpu::BufferUsages::STORAGE
-                | wgpu::BufferUsages::UNIFORM,
-        )
+        .with_usage(wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::UNIFORM)
         .create(&device);
 
     let mut iteration_counts_out_buffer = buffer::Builder::new(&initial_iteration_counts)
         .with_label("iteration-counts-buffer-2")
-        .with_usage(
-            wgpu::BufferUsages::COPY_DST
-                | wgpu::BufferUsages::STORAGE
-                | wgpu::BufferUsages::UNIFORM,
-        )
+        .with_usage(wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::UNIFORM)
         .create(&device);
 
     let total_iterations_buffer = var::Builder::new(0_u32)
         .with_label("total-iterations-buffer")
-        .with_usage(wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::UNIFORM)
+        .with_usage(wgpu::BufferUsages::UNIFORM)
         .create(&device);
 
     #[repr(C)]
@@ -329,7 +321,7 @@ fn main() {
             .collect::<Vec<_>>(),
     )
     .with_label("starting-values-in_buffer")
-    .with_usage(wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::STORAGE)
+    .with_usage(wgpu::BufferUsages::STORAGE)
     .create(&device);
 
     let mut starting_values_out_buffer = buffer::Builder::new(
@@ -338,7 +330,7 @@ fn main() {
             .collect::<Vec<_>>(),
     )
     .with_label("starting-values-out-buffer")
-    .with_usage(wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::STORAGE)
+    .with_usage(wgpu::BufferUsages::STORAGE)
     .create(&device);
 
     let mut compute_bind_group_1 = device.create_bind_group(&wgpu::BindGroupDescriptor {
@@ -478,11 +470,7 @@ fn main() {
                         iteration_counts_in_buffer,
                         buffer::Builder::new(&initial_iteration_counts)
                             .with_label("iteration-counts-in")
-                            .with_usage(
-                                wgpu::BufferUsages::COPY_DST
-                                    | wgpu::BufferUsages::UNIFORM
-                                    | wgpu::BufferUsages::STORAGE,
-                            )
+                            .with_usage(wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::STORAGE)
                             .create(&device),
                     )
                     .destroy();
@@ -491,11 +479,7 @@ fn main() {
                         iteration_counts_out_buffer,
                         buffer::Builder::new(&initial_iteration_counts)
                             .with_label("iteration-counts-out")
-                            .with_usage(
-                                wgpu::BufferUsages::COPY_DST
-                                    | wgpu::BufferUsages::UNIFORM
-                                    | wgpu::BufferUsages::STORAGE,
-                            )
+                            .with_usage(wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::STORAGE)
                             .create(&device),
                     )
                     .destroy();
@@ -508,7 +492,7 @@ fn main() {
                                 .collect::<Vec<_>>(),
                         )
                         .with_label("starting_values_in")
-                        .with_usage(wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::STORAGE)
+                        .with_usage(wgpu::BufferUsages::STORAGE)
                         .create(&device),
                     )
                     .destroy();
@@ -521,7 +505,7 @@ fn main() {
                                 .collect::<Vec<_>>(),
                         )
                         .with_label("starting_values_out")
-                        .with_usage(wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::STORAGE)
+                        .with_usage(wgpu::BufferUsages::STORAGE)
                         .create(&device),
                     )
                     .destroy();
