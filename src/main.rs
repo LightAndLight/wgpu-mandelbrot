@@ -484,31 +484,28 @@ fn main() {
                     )
                     .destroy();
 
+                    let initial_starting_values = std::iter::repeat(starting_value)
+                        .take((size.width * size.height) as usize)
+                        .collect::<Vec<_>>();
+
                     std::mem::replace(
                         starting_values_in_buffer,
-                        buffer::Builder::new(
-                            &std::iter::repeat(starting_value)
-                                .take((size.width * size.height) as usize)
-                                .collect::<Vec<_>>(),
-                        )
-                        .with_label("starting_values_in")
-                        .with_usage(wgpu::BufferUsages::STORAGE)
-                        .create(&device),
+                        buffer::Builder::new(&initial_starting_values)
+                            .with_label("starting_values_in")
+                            .with_usage(wgpu::BufferUsages::STORAGE)
+                            .create(&device),
                     )
                     .destroy();
 
                     std::mem::replace(
                         starting_values_out_buffer,
-                        buffer::Builder::new(
-                            &std::iter::repeat(starting_value)
-                                .take((size.width * size.height) as usize)
-                                .collect::<Vec<_>>(),
-                        )
-                        .with_label("starting_values_out")
-                        .with_usage(wgpu::BufferUsages::STORAGE)
-                        .create(&device),
+                        buffer::Builder::new(&initial_starting_values)
+                            .with_label("starting_values_out")
+                            .with_usage(wgpu::BufferUsages::STORAGE)
+                            .create(&device),
                     )
                     .destroy();
+
                     current_iteration_count = 0;
                     total_iterations_buffer.write(&queue, 0);
 
@@ -550,18 +547,11 @@ fn main() {
                 origin_changed = false;
 
                 if reset_buffers {
-                    starting_values_in_buffer.write(
-                        &queue,
-                        &std::iter::repeat(starting_value)
-                            .take((size.width * size.height) as usize)
-                            .collect::<Vec<_>>(),
-                    );
-                    starting_values_out_buffer.write(
-                        &queue,
-                        &std::iter::repeat(starting_value)
-                            .take((size.width * size.height) as usize)
-                            .collect::<Vec<_>>(),
-                    );
+                    let initial_starting_values = std::iter::repeat(starting_value)
+                        .take((size.width * size.height) as usize)
+                        .collect::<Vec<_>>();
+                    starting_values_in_buffer.write(&queue, &initial_starting_values);
+                    starting_values_out_buffer.write(&queue, &initial_starting_values);
 
                     let initial_iteration_counts = std::iter::repeat(IterationCount {
                         escaped: 0,
