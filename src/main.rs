@@ -1,6 +1,7 @@
 mod buffer;
 mod command_buffer;
 mod command_encoder;
+mod double_buffered;
 mod var;
 
 use bytemuck::{Pod, Zeroable};
@@ -11,29 +12,14 @@ use winit::{
     window::WindowBuilder,
 };
 
-use crate::command_encoder::CommandEncoderExt;
+use command_encoder::CommandEncoderExt;
+use double_buffered::DoubleBuffered;
 
 #[repr(C)]
 #[derive(Pod, Zeroable, Clone, Copy, Debug)]
 struct IterationCount {
     escaped: u32,
     value: u32,
-}
-
-struct DoubleBuffered<A> {
-    input: buffer::Buffer<A>,
-    output: buffer::Buffer<A>,
-}
-
-impl<A: Pod + Zeroable> DoubleBuffered<A> {
-    fn swap(&mut self) {
-        std::mem::swap(&mut self.input, &mut self.output)
-    }
-
-    fn destroy(self) {
-        self.input.destroy();
-        self.output.destroy();
-    }
 }
 
 #[repr(C)]
