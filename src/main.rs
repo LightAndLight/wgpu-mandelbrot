@@ -67,6 +67,41 @@ fn create_iteration_counts_buffers(
     }
 }
 
+#[repr(C)]
+#[derive(Pod, Zeroable, Clone, Copy)]
+struct Complex {
+    real: f32,
+    imaginary: f32,
+}
+
+impl Complex {
+    const ZERO: Self = Complex {
+        real: 0.0,
+        imaginary: 0.0,
+    };
+}
+
+fn create_starting_values_buffers(
+    device: &wgpu::Device,
+    size: ScreenSize,
+) -> DoubleBuffered<Complex> {
+    let initial_starting_values = std::iter::repeat(Complex::ZERO)
+        .take((size.width * size.height) as usize)
+        .collect::<Vec<_>>();
+
+    DoubleBuffered {
+        input: buffer::Builder::new(&initial_starting_values)
+            .with_label("starting-values-buffer-1")
+            .with_usage(wgpu::BufferUsages::STORAGE)
+            .create(device),
+
+        output: buffer::Builder::new(&initial_starting_values)
+            .with_label("starting-values-buffer-2")
+            .with_usage(wgpu::BufferUsages::STORAGE)
+            .create(device),
+    }
+}
+
 fn main() {
     env_logger::init();
 
@@ -326,7 +361,6 @@ fn main() {
         x: -0.74529,
         y: 0.113075,
     };
-    // Vec2 { x: 0.0, y: 0.0 };
 
     let origin_buffer = var::Builder::new(origin)
         .with_label("origin-buffer")
@@ -346,31 +380,13 @@ fn main() {
         .with_usage(wgpu::BufferUsages::UNIFORM)
         .create(&device);
 
-    #[repr(C)]
-    #[derive(Pod, Zeroable, Clone, Copy)]
-    struct Complex {
-        real: f32,
-        imaginary: f32,
-    }
-
-    let starting_value = Complex {
-        real: 0.0,
-        imaginary: 0.0,
-    };
-
-    let initial_starting_values = std::iter::repeat(starting_value)
-        .take((size.width * size.height) as usize)
-        .collect::<Vec<_>>();
-
-    let mut starting_values_in_buffer = buffer::Builder::new(&initial_starting_values)
-        .with_label("starting-values-in_buffer")
-        .with_usage(wgpu::BufferUsages::STORAGE)
-        .create(&device);
-
-    let mut starting_values_out_buffer = buffer::Builder::new(&initial_starting_values)
-        .with_label("starting-values-out-buffer")
-        .with_usage(wgpu::BufferUsages::STORAGE)
-        .create(&device);
+    let mut starting_values_buffers = create_starting_values_buffers(
+        &device,
+        ScreenSize {
+            width: size.width as u32,
+            height: size.height as u32,
+        },
+    );
 
     let mut compute_bind_group_1 = device.create_bind_group(&wgpu::BindGroupDescriptor {
         label: Some("compute-bind-group-1"),
@@ -419,8 +435,7 @@ fn main() {
             origin,
             cursor_position,
             iteration_counts_buffers,
-            starting_values_in_buffer,
-            starting_values_out_buffer,
+            starting_values_buffers,
         ) = (
             &mut compute_bind_group_1,
             &mut render_bind_group_1,
@@ -428,8 +443,7 @@ fn main() {
             &mut origin,
             &mut cursor_position,
             &mut iteration_counts_buffers,
-            &mut starting_values_in_buffer,
-            &mut starting_values_out_buffer,
+            &mut starting_values_buffers,
         );
 
         // To present frames in realtime, *don't* set `control_flow` to `Wait`.
@@ -506,25 +520,9 @@ fn main() {
                     )
                     .destroy();
 
-                    let initial_starting_values = std::iter::repeat(starting_value)
-                        .take((size.width * size.height) as usize)
-                        .collect::<Vec<_>>();
-
                     std::mem::replace(
-                        starting_values_in_buffer,
-                        buffer::Builder::new(&initial_starting_values)
-                            .with_label("starting_values_in")
-                            .with_usage(wgpu::BufferUsages::STORAGE)
-                            .create(&device),
-                    )
-                    .destroy();
-
-                    std::mem::replace(
-                        starting_values_out_buffer,
-                        buffer::Builder::new(&initial_starting_values)
-                            .with_label("starting_values_out")
-                            .with_usage(wgpu::BufferUsages::STORAGE)
-                            .create(&device),
+                        starting_values_buffers,
+                        create_starting_values_buffers(&device, screen_size),
                     )
                     .destroy();
 
@@ -575,11 +573,15 @@ fn main() {
                 origin_changed = false;
 
                 if reset_buffers {
-                    let initial_starting_values = std::iter::repeat(starting_value)
+                    let initial_starting_values = std::iter::repeat(Complex::ZERO)
                         .take((size.width * size.height) as usize)
                         .collect::<Vec<_>>();
-                    starting_values_in_buffer.write(&queue, &initial_starting_values);
-                    starting_values_out_buffer.write(&queue, &initial_starting_values);
+                    starting_values_buffers
+                        .input
+                        .write(&queue, &initial_starting_values);
+                    starting_values_buffers
+                        .output
+                        .write(&queue, &initial_starting_values);
 
                     let initial_iteration_counts = std::iter::repeat(IterationCount {
                         escaped: 0,
@@ -613,12 +615,12 @@ fn main() {
                         // compute.wgsl#starting_values_in
                         wgpu::BindGroupEntry {
                             binding: 0,
-                            resource: starting_values_in_buffer.binding_resource(0, None),
+                            resource: starting_values_buffers.input.binding_resource(0, None),
                         },
                         // compute.wgsl#starting_values_out
                         wgpu::BindGroupEntry {
                             binding: 1,
-                            resource: starting_values_out_buffer.binding_resource(0, None),
+                            resource: starting_values_buffers.output.binding_resource(0, None),
                         },
                         // compute.wgsl#iteration_counts_in
                         wgpu::BindGroupEntry {
@@ -704,7 +706,7 @@ fn main() {
                 queue.submit([command_buffer]);
                 surface_texture.present();
 
-                std::mem::swap(starting_values_in_buffer, starting_values_out_buffer);
+                starting_values_buffers.swap();
                 iteration_counts_buffers.swap();
                 current_iteration_count += 1;
             }
