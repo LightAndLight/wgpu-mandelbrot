@@ -1,22 +1,22 @@
-use std::{marker::PhantomData, num::NonZeroU64};
+use std::marker::PhantomData;
 
 use wgpu::util::DeviceExt;
 
-pub struct Buffer<A> {
+pub struct Var<A> {
     buffer: wgpu::Buffer,
     phantom_data: PhantomData<A>,
 }
 
-impl<A: bytemuck::Pod + bytemuck::Zeroable> Buffer<A> {
-    pub fn write(&self, queue: &wgpu::Queue, contents: &[A]) {
-        queue.write_buffer(&self.buffer, 0, bytemuck::cast_slice(contents));
+impl<A: bytemuck::Pod + bytemuck::Zeroable> Var<A> {
+    pub fn write(&self, queue: &wgpu::Queue, contents: A) {
+        queue.write_buffer(&self.buffer, 0, bytemuck::cast_slice(&[contents]));
     }
 
-    pub fn binding_resource(&self, offset: u64, size: Option<NonZeroU64>) -> wgpu::BindingResource {
+    pub fn binding_resource(&self) -> wgpu::BindingResource {
         wgpu::BindingResource::Buffer(wgpu::BufferBinding {
             buffer: &self.buffer,
-            offset,
-            size,
+            offset: 0,
+            size: None,
         })
     }
 
@@ -27,18 +27,16 @@ impl<A: bytemuck::Pod + bytemuck::Zeroable> Buffer<A> {
 
 pub struct Builder<'a, A> {
     label: Option<&'a str>,
-    contents: &'a [u8],
+    contents: A,
     usage: wgpu::BufferUsages,
-    phantom_data: PhantomData<A>,
 }
 
 impl<'a, A: bytemuck::Pod + bytemuck::Zeroable> Builder<'a, A> {
-    pub fn new(contents: &'a [A]) -> Self {
+    pub fn new(contents: A) -> Self {
         Self {
             label: None,
-            contents: bytemuck::cast_slice(contents),
+            contents,
             usage: wgpu::BufferUsages::empty(),
-            phantom_data: PhantomData,
         }
     }
 
@@ -52,14 +50,14 @@ impl<'a, A: bytemuck::Pod + bytemuck::Zeroable> Builder<'a, A> {
         self
     }
 
-    pub fn create(self, device: &wgpu::Device) -> Buffer<A> {
+    pub fn create(self, device: &wgpu::Device) -> Var<A> {
         let buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: self.label,
-            contents: self.contents,
+            contents: bytemuck::cast_slice(&[self.contents]),
             usage: self.usage,
         });
 
-        Buffer {
+        Var {
             buffer,
             phantom_data: PhantomData,
         }

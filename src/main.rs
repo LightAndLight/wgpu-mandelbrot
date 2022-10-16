@@ -1,4 +1,5 @@
 mod buffer;
+mod var;
 
 use bytemuck::{Pod, Zeroable};
 use log::debug;
@@ -236,18 +237,26 @@ fn main() {
         multiview: None,
     });
 
-    let screen_size_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-        label: Some("screen-size-buffer"),
-        contents: bytemuck::cast_slice(&[size.width as u32, size.height as u32]),
-        usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-    });
+    #[repr(C)]
+    #[derive(Pod, Zeroable, Clone, Copy, Debug)]
+    struct ScreenSize {
+        width: u32,
+        height: u32,
+    }
+
+    let screen_size_buffer = var::Builder::new(ScreenSize {
+        width: size.width as u32,
+        height: size.height as u32,
+    })
+    .with_label("screen-size-buffer")
+    .with_usage(wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST)
+    .create(&device);
 
     let mut zoom: f32 = 1.0;
-    let zoom_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-        label: Some("zoom-buffer"),
-        contents: bytemuck::cast_slice(&[zoom]),
-        usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-    });
+    let zoom_buffer = var::Builder::new(zoom)
+        .with_label("zoom-buffer")
+        .with_usage(wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST)
+        .create(&device);
 
     #[repr(C)]
     #[derive(Pod, Zeroable, Clone, Copy, Debug)]
@@ -261,11 +270,10 @@ fn main() {
     };
     // Vec2 { x: 0.0, y: 0.0 };
 
-    let origin_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-        label: Some("origin-buffer"),
-        contents: bytemuck::cast_slice(&[origin]),
-        usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-    });
+    let origin_buffer = var::Builder::new(origin)
+        .with_label("origin-buffer")
+        .with_usage(wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST)
+        .create(&device);
 
     #[repr(C)]
     #[derive(Pod, Zeroable, Clone, Copy, Debug)]
@@ -299,11 +307,10 @@ fn main() {
         )
         .create(&device);
 
-    let total_iterations_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-        label: Some("total-iterations-buffer"),
-        contents: bytemuck::cast_slice(&[0_u32]),
-        usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::UNIFORM,
-    });
+    let total_iterations_buffer = var::Builder::new(0_u32)
+        .with_label("total-iterations-buffer")
+        .with_usage(wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::UNIFORM)
+        .create(&device);
 
     #[repr(C)]
     #[derive(Pod, Zeroable, Clone, Copy)]
@@ -345,27 +352,15 @@ fn main() {
         entries: &[
             wgpu::BindGroupEntry {
                 binding: 0,
-                resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
-                    buffer: &screen_size_buffer,
-                    offset: 0,
-                    size: None,
-                }),
+                resource: screen_size_buffer.binding_resource(),
             },
             wgpu::BindGroupEntry {
                 binding: 1,
-                resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
-                    buffer: &zoom_buffer,
-                    offset: 0,
-                    size: None,
-                }),
+                resource: zoom_buffer.binding_resource(),
             },
             wgpu::BindGroupEntry {
                 binding: 2,
-                resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
-                    buffer: &origin_buffer,
-                    offset: 0,
-                    size: None,
-                }),
+                resource: origin_buffer.binding_resource(),
             },
         ],
     });
@@ -375,11 +370,7 @@ fn main() {
         layout: &render_pipeline.get_bind_group_layout(0),
         entries: &[wgpu::BindGroupEntry {
             binding: 0,
-            resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
-                buffer: &screen_size_buffer,
-                offset: 0,
-                size: None,
-            }),
+            resource: screen_size_buffer.binding_resource(),
         }],
     });
 
@@ -451,7 +442,7 @@ fn main() {
                     };
                     debug!("origin set to {:?}", origin);
                     origin_changed = true;
-                    queue.write_buffer(&origin_buffer, 0, bytemuck::cast_slice(&[*origin]));
+                    origin_buffer.write(&queue, *origin);
                 }
                 WindowEvent::MouseWheel { delta, .. } => {
                     *zoom += *zoom
@@ -463,7 +454,7 @@ fn main() {
                             }
                         };
                     zoom_changed = true;
-                    queue.write_buffer(&zoom_buffer, 0, bytemuck::cast_slice(&[*zoom]));
+                    zoom_buffer.write(&queue, *zoom);
                 }
                 WindowEvent::Resized(size) => {
                     debug!("resizing to {:?}", size);
@@ -473,10 +464,12 @@ fn main() {
 
                     surface.configure(&device, &surface_configuration);
 
-                    queue.write_buffer(
-                        &screen_size_buffer,
-                        0,
-                        bytemuck::cast_slice(&[size.width as u32, size.height as u32]),
+                    screen_size_buffer.write(
+                        &queue,
+                        ScreenSize {
+                            width: size.width as u32,
+                            height: size.height as u32,
+                        },
                     );
 
                     let initial_iteration_counts = std::iter::repeat(IterationCount {
@@ -536,7 +529,7 @@ fn main() {
                             usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::STORAGE,
                         });
                     current_iteration_count = 0;
-                    queue.write_buffer(&total_iterations_buffer, 0, bytemuck::cast_slice(&[0_u32]));
+                    total_iterations_buffer.write(&queue, 0);
 
                     *compute_bind_group_1 = device.create_bind_group(&wgpu::BindGroupDescriptor {
                         label: Some("compute-bind-group"),
@@ -544,27 +537,15 @@ fn main() {
                         entries: &[
                             wgpu::BindGroupEntry {
                                 binding: 0,
-                                resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
-                                    buffer: &screen_size_buffer,
-                                    offset: 0,
-                                    size: None,
-                                }),
+                                resource: screen_size_buffer.binding_resource(),
                             },
                             wgpu::BindGroupEntry {
                                 binding: 1,
-                                resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
-                                    buffer: &zoom_buffer,
-                                    offset: 0,
-                                    size: None,
-                                }),
+                                resource: zoom_buffer.binding_resource(),
                             },
                             wgpu::BindGroupEntry {
                                 binding: 2,
-                                resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
-                                    buffer: &origin_buffer,
-                                    offset: 0,
-                                    size: None,
-                                }),
+                                resource: origin_buffer.binding_resource(),
                             },
                         ],
                     });
@@ -574,11 +555,7 @@ fn main() {
                         layout: &render_pipeline.get_bind_group_layout(0),
                         entries: &[wgpu::BindGroupEntry {
                             binding: 0,
-                            resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
-                                buffer: &screen_size_buffer,
-                                offset: 0,
-                                size: None,
-                            }),
+                            resource: screen_size_buffer.binding_resource(),
                         }],
                     });
 
@@ -621,14 +598,10 @@ fn main() {
                     iteration_counts_out_buffer.write(&queue, &initial_iteration_counts);
 
                     current_iteration_count = 0;
-                    queue.write_buffer(&total_iterations_buffer, 0, bytemuck::cast_slice(&[0_u32]));
+                    total_iterations_buffer.write(&queue, 0);
                 }
 
-                queue.write_buffer(
-                    &total_iterations_buffer,
-                    0,
-                    bytemuck::cast_slice(&[current_iteration_count]),
-                );
+                total_iterations_buffer.write(&queue, current_iteration_count);
 
                 let surface_texture = surface.get_current_texture().unwrap();
 
@@ -673,11 +646,7 @@ fn main() {
                     entries: &[
                         wgpu::BindGroupEntry {
                             binding: 0,
-                            resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
-                                buffer: &total_iterations_buffer,
-                                offset: 0,
-                                size: None,
-                            }),
+                            resource: total_iterations_buffer.binding_resource(),
                         },
                         wgpu::BindGroupEntry {
                             binding: 1,
