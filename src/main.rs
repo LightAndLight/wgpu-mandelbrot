@@ -3,7 +3,6 @@ mod var;
 
 use bytemuck::{Pod, Zeroable};
 use log::debug;
-use wgpu::util::DeviceExt;
 use winit::{
     event::{Event, WindowEvent},
     event_loop::{ControlFlow, EventLoop},
@@ -324,27 +323,23 @@ fn main() {
         imaginary: 0.0,
     };
 
-    let mut starting_values_in_buffer =
-        device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("starting-values-in_buffer"),
-            contents: bytemuck::cast_slice(
-                &std::iter::repeat(starting_value)
-                    .take((size.width * size.height) as usize)
-                    .collect::<Vec<_>>(),
-            ),
-            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::STORAGE,
-        });
+    let mut starting_values_in_buffer = buffer::Builder::new(
+        &std::iter::repeat(starting_value)
+            .take((size.width * size.height) as usize)
+            .collect::<Vec<_>>(),
+    )
+    .with_label("starting-values-in_buffer")
+    .with_usage(wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::STORAGE)
+    .create(&device);
 
-    let mut starting_values_out_buffer =
-        device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("starting-values-out-buffer"),
-            contents: bytemuck::cast_slice(
-                &std::iter::repeat(starting_value)
-                    .take((size.width * size.height) as usize)
-                    .collect::<Vec<_>>(),
-            ),
-            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::STORAGE,
-        });
+    let mut starting_values_out_buffer = buffer::Builder::new(
+        &std::iter::repeat(starting_value)
+            .take((size.width * size.height) as usize)
+            .collect::<Vec<_>>(),
+    )
+    .with_label("starting-values-out-buffer")
+    .with_usage(wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::STORAGE)
+    .create(&device);
 
     let mut compute_bind_group_1 = device.create_bind_group(&wgpu::BindGroupDescriptor {
         label: Some("compute-bind-group-1"),
@@ -505,29 +500,31 @@ fn main() {
                     )
                     .destroy();
 
-                    starting_values_in_buffer.destroy();
-                    *starting_values_in_buffer =
-                        device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                            label: Some("starting_values_in"),
-                            contents: bytemuck::cast_slice(
-                                &std::iter::repeat(starting_value)
-                                    .take((size.width * size.height) as usize)
-                                    .collect::<Vec<_>>(),
-                            ),
-                            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::STORAGE,
-                        });
+                    std::mem::replace(
+                        starting_values_in_buffer,
+                        buffer::Builder::new(
+                            &std::iter::repeat(starting_value)
+                                .take((size.width * size.height) as usize)
+                                .collect::<Vec<_>>(),
+                        )
+                        .with_label("starting_values_in")
+                        .with_usage(wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::STORAGE)
+                        .create(&device),
+                    )
+                    .destroy();
 
-                    starting_values_out_buffer.destroy();
-                    *starting_values_out_buffer =
-                        device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                            label: Some("starting_values_out"),
-                            contents: bytemuck::cast_slice(
-                                &std::iter::repeat(starting_value)
-                                    .take((size.width * size.height) as usize)
-                                    .collect::<Vec<_>>(),
-                            ),
-                            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::STORAGE,
-                        });
+                    std::mem::replace(
+                        starting_values_out_buffer,
+                        buffer::Builder::new(
+                            &std::iter::repeat(starting_value)
+                                .take((size.width * size.height) as usize)
+                                .collect::<Vec<_>>(),
+                        )
+                        .with_label("starting_values_out")
+                        .with_usage(wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::STORAGE)
+                        .create(&device),
+                    )
+                    .destroy();
                     current_iteration_count = 0;
                     total_iterations_buffer.write(&queue, 0);
 
@@ -569,23 +566,17 @@ fn main() {
                 origin_changed = false;
 
                 if reset_buffers {
-                    queue.write_buffer(
-                        starting_values_in_buffer,
-                        0,
-                        bytemuck::cast_slice(
-                            &std::iter::repeat(starting_value)
-                                .take((size.width * size.height) as usize)
-                                .collect::<Vec<_>>(),
-                        ),
+                    starting_values_in_buffer.write(
+                        &queue,
+                        &std::iter::repeat(starting_value)
+                            .take((size.width * size.height) as usize)
+                            .collect::<Vec<_>>(),
                     );
-                    queue.write_buffer(
-                        starting_values_out_buffer,
-                        0,
-                        bytemuck::cast_slice(
-                            &std::iter::repeat(starting_value)
-                                .take((size.width * size.height) as usize)
-                                .collect::<Vec<_>>(),
-                        ),
+                    starting_values_out_buffer.write(
+                        &queue,
+                        &std::iter::repeat(starting_value)
+                            .take((size.width * size.height) as usize)
+                            .collect::<Vec<_>>(),
                     );
 
                     let initial_iteration_counts = std::iter::repeat(IterationCount {
@@ -615,19 +606,11 @@ fn main() {
                     entries: &[
                         wgpu::BindGroupEntry {
                             binding: 0,
-                            resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
-                                buffer: starting_values_in_buffer,
-                                offset: 0,
-                                size: None,
-                            }),
+                            resource: starting_values_in_buffer.binding_resource(0, None),
                         },
                         wgpu::BindGroupEntry {
                             binding: 1,
-                            resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
-                                buffer: starting_values_out_buffer,
-                                offset: 0,
-                                size: None,
-                            }),
+                            resource: starting_values_out_buffer.binding_resource(0, None),
                         },
                         wgpu::BindGroupEntry {
                             binding: 2,
