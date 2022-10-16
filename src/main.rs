@@ -1,4 +1,5 @@
 mod buffer;
+mod command_buffer;
 mod command_encoder;
 mod var;
 
@@ -58,6 +59,7 @@ fn main() {
         device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("compute-bind-group-layout-1"),
             entries: &[
+                // compute.wgsl#screen_size
                 wgpu::BindGroupLayoutEntry {
                     binding: 0,
                     visibility: wgpu::ShaderStages::COMPUTE,
@@ -68,6 +70,7 @@ fn main() {
                     },
                     count: None,
                 },
+                // compute.wgsl#zoom
                 wgpu::BindGroupLayoutEntry {
                     binding: 1,
                     visibility: wgpu::ShaderStages::COMPUTE,
@@ -78,6 +81,7 @@ fn main() {
                     },
                     count: None,
                 },
+                // compute.wgsl#origin
                 wgpu::BindGroupLayoutEntry {
                     binding: 2,
                     visibility: wgpu::ShaderStages::COMPUTE,
@@ -95,7 +99,7 @@ fn main() {
         device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("compute-bind-group-layout-2"),
             entries: &[
-                // starting_values_in
+                // compute.wgsl#starting_values_in
                 wgpu::BindGroupLayoutEntry {
                     binding: 0,
                     visibility: wgpu::ShaderStages::COMPUTE,
@@ -106,7 +110,7 @@ fn main() {
                     },
                     count: None,
                 },
-                // starting_values_out
+                // compute.wgsl#starting_values_out
                 wgpu::BindGroupLayoutEntry {
                     binding: 1,
                     visibility: wgpu::ShaderStages::COMPUTE,
@@ -117,7 +121,7 @@ fn main() {
                     },
                     count: None,
                 },
-                // iteration_counts_in
+                // compute.wgsl#iteration_counts_in
                 wgpu::BindGroupLayoutEntry {
                     binding: 2,
                     visibility: wgpu::ShaderStages::COMPUTE,
@@ -128,7 +132,7 @@ fn main() {
                     },
                     count: None,
                 },
-                // iteration_counts_out
+                // compute.wgsl#iteration_counts_out
                 wgpu::BindGroupLayoutEntry {
                     binding: 3,
                     visibility: wgpu::ShaderStages::COMPUTE,
@@ -163,22 +167,8 @@ fn main() {
     let render_bind_group_layout_1 =
         device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("render-bind-group-layout"),
-            entries: &[wgpu::BindGroupLayoutEntry {
-                binding: 0,
-                visibility: wgpu::ShaderStages::FRAGMENT,
-                ty: wgpu::BindingType::Buffer {
-                    ty: wgpu::BufferBindingType::Uniform,
-                    has_dynamic_offset: false,
-                    min_binding_size: None,
-                },
-                count: None,
-            }],
-        });
-
-    let render_bind_group_layout_2 =
-        device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            label: Some("render-bind-group-layout-2"),
             entries: &[
+                // shader.wgsl#screen_size
                 wgpu::BindGroupLayoutEntry {
                     binding: 0,
                     visibility: wgpu::ShaderStages::FRAGMENT,
@@ -189,6 +179,25 @@ fn main() {
                     },
                     count: None,
                 },
+            ],
+        });
+
+    let render_bind_group_layout_2 =
+        device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("render-bind-group-layout-2"),
+            entries: &[
+                // shader.wgsl#total_iterations
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+                // shader.wgsl#iteration_counts
                 wgpu::BindGroupLayoutEntry {
                     binding: 1,
                     visibility: wgpu::ShaderStages::FRAGMENT,
@@ -318,36 +327,35 @@ fn main() {
         imaginary: 0.0,
     };
 
-    let mut starting_values_in_buffer = buffer::Builder::new(
-        &std::iter::repeat(starting_value)
-            .take((size.width * size.height) as usize)
-            .collect::<Vec<_>>(),
-    )
-    .with_label("starting-values-in_buffer")
-    .with_usage(wgpu::BufferUsages::STORAGE)
-    .create(&device);
+    let initial_starting_values = std::iter::repeat(starting_value)
+        .take((size.width * size.height) as usize)
+        .collect::<Vec<_>>();
 
-    let mut starting_values_out_buffer = buffer::Builder::new(
-        &std::iter::repeat(starting_value)
-            .take((size.width * size.height) as usize)
-            .collect::<Vec<_>>(),
-    )
-    .with_label("starting-values-out-buffer")
-    .with_usage(wgpu::BufferUsages::STORAGE)
-    .create(&device);
+    let mut starting_values_in_buffer = buffer::Builder::new(&initial_starting_values)
+        .with_label("starting-values-in_buffer")
+        .with_usage(wgpu::BufferUsages::STORAGE)
+        .create(&device);
+
+    let mut starting_values_out_buffer = buffer::Builder::new(&initial_starting_values)
+        .with_label("starting-values-out-buffer")
+        .with_usage(wgpu::BufferUsages::STORAGE)
+        .create(&device);
 
     let mut compute_bind_group_1 = device.create_bind_group(&wgpu::BindGroupDescriptor {
         label: Some("compute-bind-group-1"),
         layout: &compute_bind_group_layout_1,
         entries: &[
+            // compute.wgsl#screen_size
             wgpu::BindGroupEntry {
                 binding: 0,
                 resource: screen_size_buffer.binding_resource(),
             },
+            // compute.wgsl#zoom
             wgpu::BindGroupEntry {
                 binding: 1,
                 resource: zoom_buffer.binding_resource(),
             },
+            // compute.wgsl#origin
             wgpu::BindGroupEntry {
                 binding: 2,
                 resource: origin_buffer.binding_resource(),
@@ -358,10 +366,13 @@ fn main() {
     let mut render_bind_group_1 = device.create_bind_group(&wgpu::BindGroupDescriptor {
         label: Some("render-bind-group"),
         layout: &render_pipeline.get_bind_group_layout(0),
-        entries: &[wgpu::BindGroupEntry {
-            binding: 0,
-            resource: screen_size_buffer.binding_resource(),
-        }],
+        entries: &[
+            // shader.wgsl#screen_size
+            wgpu::BindGroupEntry {
+                binding: 0,
+                resource: screen_size_buffer.binding_resource(),
+            },
+        ],
     });
 
     let mut cursor_position = Vec2 { x: 0.0, y: 0.0 };
@@ -516,14 +527,17 @@ fn main() {
                         label: Some("compute-bind-group"),
                         layout: &compute_bind_group_layout_1,
                         entries: &[
+                            // compute.wgsl#screen_size
                             wgpu::BindGroupEntry {
                                 binding: 0,
                                 resource: screen_size_buffer.binding_resource(),
                             },
+                            // compute.wgsl#zoom
                             wgpu::BindGroupEntry {
                                 binding: 1,
                                 resource: zoom_buffer.binding_resource(),
                             },
+                            // compute.wgsl#origin
                             wgpu::BindGroupEntry {
                                 binding: 2,
                                 resource: origin_buffer.binding_resource(),
@@ -534,10 +548,13 @@ fn main() {
                     *render_bind_group_1 = device.create_bind_group(&wgpu::BindGroupDescriptor {
                         label: Some("render-bind-group"),
                         layout: &render_pipeline.get_bind_group_layout(0),
-                        entries: &[wgpu::BindGroupEntry {
-                            binding: 0,
-                            resource: screen_size_buffer.binding_resource(),
-                        }],
+                        entries: &[
+                            // shader.wgsl#screen_size
+                            wgpu::BindGroupEntry {
+                                binding: 0,
+                                resource: screen_size_buffer.binding_resource(),
+                            },
+                        ],
                     });
 
                     window.request_redraw();
@@ -581,18 +598,22 @@ fn main() {
                     label: Some("compute-bind-group-2"),
                     layout: &compute_bind_group_layout_2,
                     entries: &[
+                        // compute.wgsl#starting_values_in
                         wgpu::BindGroupEntry {
                             binding: 0,
                             resource: starting_values_in_buffer.binding_resource(0, None),
                         },
+                        // compute.wgsl#starting_values_out
                         wgpu::BindGroupEntry {
                             binding: 1,
                             resource: starting_values_out_buffer.binding_resource(0, None),
                         },
+                        // compute.wgsl#iteration_counts_in
                         wgpu::BindGroupEntry {
                             binding: 2,
                             resource: iteration_counts_in_buffer.binding_resource(0, None),
                         },
+                        // compute.wgsl#iteration_counts_out
                         wgpu::BindGroupEntry {
                             binding: 3,
                             resource: iteration_counts_out_buffer.binding_resource(0, None),
@@ -604,10 +625,12 @@ fn main() {
                     label: Some("render-bind-group-2"),
                     layout: &render_pipeline.get_bind_group_layout(1),
                     entries: &[
+                        // shader.wgsl#total_iterations
                         wgpu::BindGroupEntry {
                             binding: 0,
                             resource: total_iterations_buffer.binding_resource(),
                         },
+                        // shader.wgsl#iteration_counts
                         wgpu::BindGroupEntry {
                             binding: 1,
                             resource: iteration_counts_in_buffer.binding_resource(0, None),
@@ -615,59 +638,58 @@ fn main() {
                     ],
                 });
 
-                let command_encoder = {
-                    let mut command_encoder =
-                        device.create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
+                let command_buffer = command_buffer::create(
+                    &device,
+                    &wgpu::CommandEncoderDescriptor::default(),
+                    |command_encoder| {
+                        command_encoder.push_debug_group("compute-pass");
+                        command_encoder.with_compute_pass(
+                            &wgpu::ComputePassDescriptor {
+                                label: Some("compute-pass"),
+                            },
+                            |compute_pass| {
+                                compute_pass.set_pipeline(&compute_pipeline);
 
-                    command_encoder.push_debug_group("compute-pass");
-                    command_encoder.with_compute_pass(
-                        &wgpu::ComputePassDescriptor {
-                            label: Some("compute-pass"),
-                        },
-                        |compute_pass| {
-                            compute_pass.set_pipeline(&compute_pipeline);
+                                compute_pass.set_bind_group(0, compute_bind_group_1, &[]);
+                                compute_pass.set_bind_group(1, &compute_bind_group_2, &[]);
 
-                            compute_pass.set_bind_group(0, compute_bind_group_1, &[]);
-                            compute_pass.set_bind_group(1, &compute_bind_group_2, &[]);
+                                compute_pass.insert_debug_marker("mandelbrot");
+                                compute_pass.dispatch_workgroups(size.width, size.height, 1);
+                            },
+                        );
+                        command_encoder.pop_debug_group();
 
-                            compute_pass.insert_debug_marker("mandelbrot");
-                            compute_pass.dispatch_workgroups(size.width, size.height, 1);
-                        },
-                    );
-                    command_encoder.pop_debug_group();
+                        command_encoder.push_debug_group("render-pass");
+                        command_encoder.with_render_pass(
+                            &wgpu::RenderPassDescriptor {
+                                label: Some("render-pass"),
+                                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                                    view: &surface_texture_view,
+                                    resolve_target: None,
+                                    ops: wgpu::Operations {
+                                        load: wgpu::LoadOp::Clear(wgpu::Color {
+                                            r: 0.5,
+                                            g: 0.5,
+                                            b: 0.0,
+                                            a: 1.0,
+                                        }),
+                                        store: true,
+                                    },
+                                })],
+                                depth_stencil_attachment: None,
+                            },
+                            |render_pass| {
+                                render_pass.set_pipeline(&render_pipeline);
+                                render_pass.set_bind_group(0, render_bind_group_1, &[]);
+                                render_pass.set_bind_group(1, &render_bind_group_2, &[]);
+                                render_pass.draw(0..4, 0..1);
+                            },
+                        );
+                        command_encoder.pop_debug_group();
+                    },
+                );
 
-                    command_encoder.push_debug_group("render-pass");
-                    command_encoder.with_render_pass(
-                        &wgpu::RenderPassDescriptor {
-                            label: Some("render-pass"),
-                            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                                view: &surface_texture_view,
-                                resolve_target: None,
-                                ops: wgpu::Operations {
-                                    load: wgpu::LoadOp::Clear(wgpu::Color {
-                                        r: 0.5,
-                                        g: 0.5,
-                                        b: 0.0,
-                                        a: 1.0,
-                                    }),
-                                    store: true,
-                                },
-                            })],
-                            depth_stencil_attachment: None,
-                        },
-                        |render_pass| {
-                            render_pass.set_pipeline(&render_pipeline);
-                            render_pass.set_bind_group(0, render_bind_group_1, &[]);
-                            render_pass.set_bind_group(1, &render_bind_group_2, &[]);
-                            render_pass.draw(0..4, 0..1);
-                        },
-                    );
-                    command_encoder.pop_debug_group();
-
-                    command_encoder
-                };
-
-                queue.submit([command_encoder.finish()]);
+                queue.submit([command_buffer]);
                 surface_texture.present();
 
                 std::mem::swap(starting_values_in_buffer, starting_values_out_buffer);
