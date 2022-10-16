@@ -102,6 +102,13 @@ fn create_starting_values_buffers(
     }
 }
 
+#[repr(C)]
+#[derive(Pod, Zeroable, Clone, Copy, Debug)]
+struct Vec2 {
+    x: f32,
+    y: f32,
+}
+
 fn main() {
     env_logger::init();
 
@@ -119,6 +126,7 @@ fn main() {
         compatible_surface: Some(&surface),
     }))
     .unwrap();
+
     let (device, queue) = pollster::block_on(adapter.request_device(
         &wgpu::DeviceDescriptor {
             label: Some("device"),
@@ -337,13 +345,14 @@ fn main() {
         multiview: None,
     });
 
-    let screen_size_buffer = var::Builder::new(ScreenSize {
+    let screen_size = ScreenSize {
         width: size.width as u32,
         height: size.height as u32,
-    })
-    .with_label("screen-size-buffer")
-    .with_usage(wgpu::BufferUsages::UNIFORM)
-    .create(&device);
+    };
+    let screen_size_buffer = var::Builder::new(screen_size)
+        .with_label("screen-size-buffer")
+        .with_usage(wgpu::BufferUsages::UNIFORM)
+        .create(&device);
 
     let mut zoom: f32 = 1.0;
     let zoom_buffer = var::Builder::new(zoom)
@@ -351,42 +360,23 @@ fn main() {
         .with_usage(wgpu::BufferUsages::UNIFORM)
         .create(&device);
 
-    #[repr(C)]
-    #[derive(Pod, Zeroable, Clone, Copy, Debug)]
-    struct Vec2 {
-        x: f32,
-        y: f32,
-    }
     let mut origin: Vec2 = Vec2 {
         x: -0.74529,
         y: 0.113075,
     };
-
     let origin_buffer = var::Builder::new(origin)
         .with_label("origin-buffer")
         .with_usage(wgpu::BufferUsages::UNIFORM)
         .create(&device);
 
-    let mut iteration_counts_buffers = create_iteration_counts_buffers(
-        &device,
-        ScreenSize {
-            width: size.width as u32,
-            height: size.height as u32,
-        },
-    );
+    let mut iteration_counts_buffers = create_iteration_counts_buffers(&device, screen_size);
 
     let total_iterations_buffer = var::Builder::new(0_u32)
         .with_label("total-iterations-buffer")
         .with_usage(wgpu::BufferUsages::UNIFORM)
         .create(&device);
 
-    let mut starting_values_buffers = create_starting_values_buffers(
-        &device,
-        ScreenSize {
-            width: size.width as u32,
-            height: size.height as u32,
-        },
-    );
+    let mut starting_values_buffers = create_starting_values_buffers(&device, screen_size);
 
     let mut compute_bind_group_1 = device.create_bind_group(&wgpu::BindGroupDescriptor {
         label: Some("compute-bind-group-1"),
