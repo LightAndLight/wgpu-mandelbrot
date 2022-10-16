@@ -13,6 +13,60 @@ use winit::{
 
 use crate::command_encoder::CommandEncoderExt;
 
+#[repr(C)]
+#[derive(Pod, Zeroable, Clone, Copy, Debug)]
+struct IterationCount {
+    escaped: u32,
+    value: u32,
+}
+
+struct IterationCountsBuffers {
+    r#in: buffer::Buffer<IterationCount>,
+    out: buffer::Buffer<IterationCount>,
+}
+
+impl IterationCountsBuffers {
+    fn swap(&mut self) {
+        std::mem::swap(&mut self.r#in, &mut self.out)
+    }
+
+    fn destroy(self) {
+        self.r#in.destroy();
+        self.out.destroy();
+    }
+}
+
+#[repr(C)]
+#[derive(Pod, Zeroable, Clone, Copy, Debug)]
+struct ScreenSize {
+    width: u32,
+    height: u32,
+}
+
+fn create_iteration_counts_buffers(
+    device: &wgpu::Device,
+    size: ScreenSize,
+) -> IterationCountsBuffers {
+    let initial_iteration_counts = std::iter::repeat(IterationCount {
+        escaped: 0,
+        value: 0,
+    })
+    .take((size.width * size.height) as usize)
+    .collect::<Vec<_>>();
+
+    IterationCountsBuffers {
+        r#in: buffer::Builder::new(&initial_iteration_counts)
+            .with_label("iteration-counts-buffer-1")
+            .with_usage(wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::UNIFORM)
+            .create(device),
+
+        out: buffer::Builder::new(&initial_iteration_counts)
+            .with_label("iteration-counts-buffer-2")
+            .with_usage(wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::UNIFORM)
+            .create(device),
+    }
+}
+
 fn main() {
     env_logger::init();
 
@@ -248,13 +302,6 @@ fn main() {
         multiview: None,
     });
 
-    #[repr(C)]
-    #[derive(Pod, Zeroable, Clone, Copy, Debug)]
-    struct ScreenSize {
-        width: u32,
-        height: u32,
-    }
-
     let screen_size_buffer = var::Builder::new(ScreenSize {
         width: size.width as u32,
         height: size.height as u32,
@@ -286,29 +333,13 @@ fn main() {
         .with_usage(wgpu::BufferUsages::UNIFORM)
         .create(&device);
 
-    #[repr(C)]
-    #[derive(Pod, Zeroable, Clone, Copy, Debug)]
-    struct IterationCount {
-        escaped: u32,
-        value: u32,
-    }
-
-    let initial_iteration_counts = std::iter::repeat(IterationCount {
-        escaped: 0,
-        value: 0,
-    })
-    .take((size.width * size.height) as usize)
-    .collect::<Vec<_>>();
-
-    let mut iteration_counts_in_buffer = buffer::Builder::new(&initial_iteration_counts)
-        .with_label("iteration-counts-buffer-1")
-        .with_usage(wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::UNIFORM)
-        .create(&device);
-
-    let mut iteration_counts_out_buffer = buffer::Builder::new(&initial_iteration_counts)
-        .with_label("iteration-counts-buffer-2")
-        .with_usage(wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::UNIFORM)
-        .create(&device);
+    let mut iteration_counts_buffers = create_iteration_counts_buffers(
+        &device,
+        ScreenSize {
+            width: size.width as u32,
+            height: size.height as u32,
+        },
+    );
 
     let total_iterations_buffer = var::Builder::new(0_u32)
         .with_label("total-iterations-buffer")
@@ -387,8 +418,7 @@ fn main() {
             zoom,
             origin,
             cursor_position,
-            iteration_counts_in_buffer,
-            iteration_counts_out_buffer,
+            iteration_counts_buffers,
             starting_values_in_buffer,
             starting_values_out_buffer,
         ) = (
@@ -397,8 +427,7 @@ fn main() {
             &mut zoom,
             &mut origin,
             &mut cursor_position,
-            &mut iteration_counts_in_buffer,
-            &mut iteration_counts_out_buffer,
+            &mut iteration_counts_buffers,
             &mut starting_values_in_buffer,
             &mut starting_values_out_buffer,
         );
@@ -465,36 +494,15 @@ fn main() {
 
                     surface.configure(&device, &surface_configuration);
 
-                    screen_size_buffer.write(
-                        &queue,
-                        ScreenSize {
-                            width: size.width as u32,
-                            height: size.height as u32,
-                        },
-                    );
-
-                    let initial_iteration_counts = std::iter::repeat(IterationCount {
-                        escaped: 0,
-                        value: 0,
-                    })
-                    .take((size.width * size.height) as usize)
-                    .collect::<Vec<_>>();
+                    let screen_size = ScreenSize {
+                        width: size.width as u32,
+                        height: size.height as u32,
+                    };
+                    screen_size_buffer.write(&queue, screen_size);
 
                     std::mem::replace(
-                        iteration_counts_in_buffer,
-                        buffer::Builder::new(&initial_iteration_counts)
-                            .with_label("iteration-counts-in")
-                            .with_usage(wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::STORAGE)
-                            .create(&device),
-                    )
-                    .destroy();
-
-                    std::mem::replace(
-                        iteration_counts_out_buffer,
-                        buffer::Builder::new(&initial_iteration_counts)
-                            .with_label("iteration-counts-out")
-                            .with_usage(wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::STORAGE)
-                            .create(&device),
+                        iteration_counts_buffers,
+                        create_iteration_counts_buffers(&device, screen_size),
                     )
                     .destroy();
 
@@ -579,8 +587,12 @@ fn main() {
                     })
                     .take((size.width * size.height) as usize)
                     .collect::<Vec<_>>();
-                    iteration_counts_in_buffer.write(&queue, &initial_iteration_counts);
-                    iteration_counts_out_buffer.write(&queue, &initial_iteration_counts);
+                    iteration_counts_buffers
+                        .r#in
+                        .write(&queue, &initial_iteration_counts);
+                    iteration_counts_buffers
+                        .out
+                        .write(&queue, &initial_iteration_counts);
 
                     current_iteration_count = 0;
                     total_iterations_buffer.write(&queue, 0);
@@ -611,12 +623,12 @@ fn main() {
                         // compute.wgsl#iteration_counts_in
                         wgpu::BindGroupEntry {
                             binding: 2,
-                            resource: iteration_counts_in_buffer.binding_resource(0, None),
+                            resource: iteration_counts_buffers.r#in.binding_resource(0, None),
                         },
                         // compute.wgsl#iteration_counts_out
                         wgpu::BindGroupEntry {
                             binding: 3,
-                            resource: iteration_counts_out_buffer.binding_resource(0, None),
+                            resource: iteration_counts_buffers.out.binding_resource(0, None),
                         },
                     ],
                 });
@@ -633,7 +645,7 @@ fn main() {
                         // shader.wgsl#iteration_counts
                         wgpu::BindGroupEntry {
                             binding: 1,
-                            resource: iteration_counts_in_buffer.binding_resource(0, None),
+                            resource: iteration_counts_buffers.r#in.binding_resource(0, None),
                         },
                     ],
                 });
@@ -693,7 +705,7 @@ fn main() {
                 surface_texture.present();
 
                 std::mem::swap(starting_values_in_buffer, starting_values_out_buffer);
-                std::mem::swap(iteration_counts_in_buffer, iteration_counts_out_buffer);
+                iteration_counts_buffers.swap();
                 current_iteration_count += 1;
             }
             _ => {}
