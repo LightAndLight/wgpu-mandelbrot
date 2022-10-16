@@ -2,6 +2,10 @@ struct Complex{real: f32, imaginary: f32}
 
 let ZERO_COMPLEX: Complex = Complex(0.0, 0.0);
 
+fn scale_complex(first: f32, second: Complex) -> Complex {
+  return Complex(first * second.real, first * second.imaginary);
+}
+
 fn multiply_complex(first: Complex, second: Complex) -> Complex {
   let a = first.real * second.real;
   let b = first.real * second.imaginary + first.imaginary * second.real;
@@ -70,15 +74,13 @@ fn mandelbrot(@builtin(global_invocation_id) global_invocation_id: vec3<u32>) {
   let index = y * screen_size.x + x;
   var starting_value : Complex = starting_values_in[index];
 
-  /*
-  conditions:
-
-  length_complex(starting_value) > ESCAPE_THRESHOLD implies xx < 0
-  length_complex(starting_value) == ESCAPE_THRESHOLD implies xx == 0
-  length_complex(starting_value) < ESCAPE_THRESHOLD implies xx > 0
-  
-  length_complex(starting_value) >= ESCAPE_THRESHOLD implies xx <= 0
-  */
+  // conditions:
+  // 
+  // length_complex(starting_value) > ESCAPE_THRESHOLD implies xx < 0
+  // length_complex(starting_value) == ESCAPE_THRESHOLD implies xx == 0
+  // length_complex(starting_value) < ESCAPE_THRESHOLD implies xx > 0
+  // 
+  // length_complex(starting_value) >= ESCAPE_THRESHOLD implies xx <= 0
   let escape_threshold_minus_length = ESCAPE_THRESHOLD - length_complex(starting_value);
 
   // length_complex(starting_value) >= ESCAPE_THRESHOLD implies max(xx, 0.0) == 0
@@ -103,9 +105,10 @@ fn mandelbrot(@builtin(global_invocation_id) global_invocation_id: vec3<u32>) {
   //   escaped == u32(1.0 - 1.0)
   //   escaped == u32(0.0)
   //   escaped == 0u
-  let escaped = u32(1.0 - sign(escape_threshold_minus_length_max_0));
-  iteration_counts_out[index].escaped = escaped;
-  
+  iteration_counts_out[index].escaped =
+    u32(1.0 - sign(escape_threshold_minus_length_max_0));
+
+  let escaped_last_iteration : u32 = iteration_counts_in[index].escaped;
   iteration_counts_out[index].value =
     iteration_counts_in[index].value +
     // Add nothing when the point has already escaped,
@@ -116,29 +119,30 @@ fn mandelbrot(@builtin(global_invocation_id) global_invocation_id: vec3<u32>) {
     //
     // iteration_counts_in[index].escaped == 1u implies
     //   1u - iteration_counts_in[index].escaped == 0u
-    (1u - iteration_counts_in[index].escaped);
-    
+    (1u - escaped_last_iteration);
+
+  let escaped_last_iteration : f32 = f32(escaped_last_iteration);
   starting_values_out[index] =
     // set to `starting_value` when the point has escaped.
     // set to `add_complex(multiply_complex(starting_value, starting_value), c)`
     add_complex(
       // escaped == 1u implies
-      //   multiply_complex(Complex(1.0, 0.0), starting_value),
+      //   scale_complex(1.0, starting_value),
       //   starting_value,
       //
       // escaped == 0u implies
-      //   multiply_complex(Complex(0.0, 0.0), starting_value),
+      //   scale_complex(0.0, starting_value),
       //   Complex(0.0, 0.0),
-      multiply_complex(Complex(f32(escaped), 0.0), starting_value),
+      scale_complex(escaped_last_iteration, starting_value),
       // escaped == 1u implies
-      //   multiply_complex(Complex(1.0 - 1.0, 0.0), add_complex(multiply_complex(starting_value, starting_value), c))
-      //   multiply_complex(Complex(0.0, 0.0), add_complex(multiply_complex(starting_value, starting_value), c))
+      //   scale_complex(1.0 - 1.0, add_complex(multiply_complex(starting_value, starting_value), c))
+      //   scale_complex(0.0, add_complex(multiply_complex(starting_value, starting_value), c))
       //   Complex(0.0, 0.0)
       //
       // escaped == 0u implies
-      //   multiply_complex(Complex(1.0 - 0.0, 0.0), add_complex(multiply_complex(starting_value, starting_value), c))
-      //   multiply_complex(Complex(1.0, 0.0), add_complex(multiply_complex(starting_value, starting_value), c))
+      //   scale_complex(1.0 - 0.0, add_complex(multiply_complex(starting_value, starting_value), c))
+      //   scale_complex(1.0, add_complex(multiply_complex(starting_value, starting_value), c))
       //   add_complex(multiply_complex(starting_value, starting_value), c)
-      multiply_complex(Complex(1.0 - f32(escaped), 0.0), add_complex(multiply_complex(starting_value, starting_value), c))
+      scale_complex(1.0 - escaped_last_iteration, add_complex(multiply_complex(starting_value, starting_value), c))
     );
 }
