@@ -1,4 +1,5 @@
 mod buffer;
+mod command_encoder;
 mod var;
 
 use bytemuck::{Pod, Zeroable};
@@ -8,6 +9,8 @@ use winit::{
     event_loop::{ControlFlow, EventLoop},
     window::WindowBuilder,
 };
+
+use crate::command_encoder::CommandEncoderExt;
 
 fn main() {
     env_logger::init();
@@ -617,48 +620,48 @@ fn main() {
                         device.create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
 
                     command_encoder.push_debug_group("compute-pass");
-                    {
-                        let mut compute_pass =
-                            command_encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-                                label: Some("compute-pass"),
-                            });
+                    command_encoder.with_compute_pass(
+                        &wgpu::ComputePassDescriptor {
+                            label: Some("compute-pass"),
+                        },
+                        |compute_pass| {
+                            compute_pass.set_pipeline(&compute_pipeline);
 
-                        compute_pass.set_pipeline(&compute_pipeline);
+                            compute_pass.set_bind_group(0, compute_bind_group_1, &[]);
+                            compute_pass.set_bind_group(1, &compute_bind_group_2, &[]);
 
-                        compute_pass.set_bind_group(0, compute_bind_group_1, &[]);
-                        compute_pass.set_bind_group(1, &compute_bind_group_2, &[]);
-
-                        compute_pass.insert_debug_marker("mandelbrot");
-                        compute_pass.dispatch_workgroups(size.width, size.height, 1);
-                    }
+                            compute_pass.insert_debug_marker("mandelbrot");
+                            compute_pass.dispatch_workgroups(size.width, size.height, 1);
+                        },
+                    );
                     command_encoder.pop_debug_group();
 
                     command_encoder.push_debug_group("render-pass");
-                    {
-                        let mut render_pass =
-                            command_encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                                label: Some("render-pass"),
-                                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                                    view: &surface_texture_view,
-                                    resolve_target: None,
-                                    ops: wgpu::Operations {
-                                        load: wgpu::LoadOp::Clear(wgpu::Color {
-                                            r: 0.5,
-                                            g: 0.5,
-                                            b: 0.0,
-                                            a: 1.0,
-                                        }),
-                                        store: true,
-                                    },
-                                })],
-                                depth_stencil_attachment: None,
-                            });
-
-                        render_pass.set_pipeline(&render_pipeline);
-                        render_pass.set_bind_group(0, render_bind_group_1, &[]);
-                        render_pass.set_bind_group(1, &render_bind_group_2, &[]);
-                        render_pass.draw(0..4, 0..1);
-                    }
+                    command_encoder.with_render_pass(
+                        &wgpu::RenderPassDescriptor {
+                            label: Some("render-pass"),
+                            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                                view: &surface_texture_view,
+                                resolve_target: None,
+                                ops: wgpu::Operations {
+                                    load: wgpu::LoadOp::Clear(wgpu::Color {
+                                        r: 0.5,
+                                        g: 0.5,
+                                        b: 0.0,
+                                        a: 1.0,
+                                    }),
+                                    store: true,
+                                },
+                            })],
+                            depth_stencil_attachment: None,
+                        },
+                        |render_pass| {
+                            render_pass.set_pipeline(&render_pipeline);
+                            render_pass.set_bind_group(0, render_bind_group_1, &[]);
+                            render_pass.set_bind_group(1, &render_bind_group_2, &[]);
+                            render_pass.draw(0..4, 0..1);
+                        },
+                    );
                     command_encoder.pop_debug_group();
 
                     command_encoder
