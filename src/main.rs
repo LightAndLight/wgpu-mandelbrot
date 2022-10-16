@@ -1,3 +1,5 @@
+mod buffer;
+
 use bytemuck::{Pod, Zeroable};
 use log::debug;
 use wgpu::util::DeviceExt;
@@ -272,33 +274,30 @@ fn main() {
         value: u32,
     }
 
-    let mut iteration_counts_in_buffer =
-        device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("iteration-counts-in-buffer"),
-            contents: bytemuck::cast_slice(
-                &std::iter::repeat(IterationCount {
-                    escaped: 0,
-                    value: 0,
-                })
-                .take((size.width * size.height) as usize)
-                .collect::<Vec<_>>(),
-            ),
-            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::STORAGE,
-        });
+    let initial_iteration_counts = std::iter::repeat(IterationCount {
+        escaped: 0,
+        value: 0,
+    })
+    .take((size.width * size.height) as usize)
+    .collect::<Vec<_>>();
 
-    let mut iteration_counts_out_buffer =
-        device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("iteration-counts-out-buffer"),
-            contents: bytemuck::cast_slice(
-                &std::iter::repeat(IterationCount {
-                    escaped: 0,
-                    value: 0,
-                })
-                .take((size.width * size.height) as usize)
-                .collect::<Vec<_>>(),
-            ),
-            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::STORAGE,
-        });
+    let mut iteration_counts_in_buffer = buffer::Builder::new(&initial_iteration_counts)
+        .with_label("iteration-counts-buffer-1")
+        .with_usage(
+            wgpu::BufferUsages::COPY_DST
+                | wgpu::BufferUsages::STORAGE
+                | wgpu::BufferUsages::UNIFORM,
+        )
+        .create(&device);
+
+    let mut iteration_counts_out_buffer = buffer::Builder::new(&initial_iteration_counts)
+        .with_label("iteration-counts-buffer-2")
+        .with_usage(
+            wgpu::BufferUsages::COPY_DST
+                | wgpu::BufferUsages::STORAGE
+                | wgpu::BufferUsages::UNIFORM,
+        )
+        .create(&device);
 
     let total_iterations_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
         label: Some("total-iterations-buffer"),
@@ -480,39 +479,38 @@ fn main() {
                         bytemuck::cast_slice(&[size.width as u32, size.height as u32]),
                     );
 
-                    iteration_counts_in_buffer.destroy();
-                    *iteration_counts_in_buffer =
-                        device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                            label: Some("iteration_counts_in"),
-                            contents: bytemuck::cast_slice(
-                                &std::iter::repeat(IterationCount {
-                                    escaped: 0,
-                                    value: 0,
-                                })
-                                .take((size.width * size.height) as usize)
-                                .collect::<Vec<_>>(),
-                            ),
-                            usage: wgpu::BufferUsages::COPY_DST
-                                | wgpu::BufferUsages::UNIFORM
-                                | wgpu::BufferUsages::STORAGE,
-                        });
+                    let initial_iteration_counts = std::iter::repeat(IterationCount {
+                        escaped: 0,
+                        value: 0,
+                    })
+                    .take((size.width * size.height) as usize)
+                    .collect::<Vec<_>>();
 
-                    iteration_counts_out_buffer.destroy();
-                    *iteration_counts_out_buffer =
-                        device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                            label: Some("iteration_counts_out"),
-                            contents: bytemuck::cast_slice(
-                                &std::iter::repeat(IterationCount {
-                                    escaped: 0,
-                                    value: 0,
-                                })
-                                .take((size.width * size.height) as usize)
-                                .collect::<Vec<_>>(),
-                            ),
-                            usage: wgpu::BufferUsages::COPY_DST
-                                | wgpu::BufferUsages::UNIFORM
-                                | wgpu::BufferUsages::STORAGE,
-                        });
+                    std::mem::replace(
+                        iteration_counts_in_buffer,
+                        buffer::Builder::new(&initial_iteration_counts)
+                            .with_label("iteration-counts-in")
+                            .with_usage(
+                                wgpu::BufferUsages::COPY_DST
+                                    | wgpu::BufferUsages::UNIFORM
+                                    | wgpu::BufferUsages::STORAGE,
+                            )
+                            .create(&device),
+                    )
+                    .destroy();
+
+                    std::mem::replace(
+                        iteration_counts_out_buffer,
+                        buffer::Builder::new(&initial_iteration_counts)
+                            .with_label("iteration-counts-out")
+                            .with_usage(
+                                wgpu::BufferUsages::COPY_DST
+                                    | wgpu::BufferUsages::UNIFORM
+                                    | wgpu::BufferUsages::STORAGE,
+                            )
+                            .create(&device),
+                    )
+                    .destroy();
 
                     starting_values_in_buffer.destroy();
                     *starting_values_in_buffer =
@@ -612,30 +610,16 @@ fn main() {
                                 .collect::<Vec<_>>(),
                         ),
                     );
-                    queue.write_buffer(
-                        iteration_counts_in_buffer,
-                        0,
-                        bytemuck::cast_slice(
-                            &std::iter::repeat(IterationCount {
-                                escaped: 0,
-                                value: 0,
-                            })
-                            .take((size.width * size.height) as usize)
-                            .collect::<Vec<_>>(),
-                        ),
-                    );
-                    queue.write_buffer(
-                        iteration_counts_out_buffer,
-                        0,
-                        bytemuck::cast_slice(
-                            &std::iter::repeat(IterationCount {
-                                escaped: 0,
-                                value: 0,
-                            })
-                            .take((size.width * size.height) as usize)
-                            .collect::<Vec<_>>(),
-                        ),
-                    );
+
+                    let initial_iteration_counts = std::iter::repeat(IterationCount {
+                        escaped: 0,
+                        value: 0,
+                    })
+                    .take((size.width * size.height) as usize)
+                    .collect::<Vec<_>>();
+                    iteration_counts_in_buffer.write(&queue, &initial_iteration_counts);
+                    iteration_counts_out_buffer.write(&queue, &initial_iteration_counts);
+
                     current_iteration_count = 0;
                     queue.write_buffer(&total_iterations_buffer, 0, bytemuck::cast_slice(&[0_u32]));
                 }
@@ -674,19 +658,11 @@ fn main() {
                         },
                         wgpu::BindGroupEntry {
                             binding: 2,
-                            resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
-                                buffer: iteration_counts_in_buffer,
-                                offset: 0,
-                                size: None,
-                            }),
+                            resource: iteration_counts_in_buffer.binding_resource(0, None),
                         },
                         wgpu::BindGroupEntry {
                             binding: 3,
-                            resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
-                                buffer: iteration_counts_out_buffer,
-                                offset: 0,
-                                size: None,
-                            }),
+                            resource: iteration_counts_out_buffer.binding_resource(0, None),
                         },
                     ],
                 });
@@ -705,11 +681,7 @@ fn main() {
                         },
                         wgpu::BindGroupEntry {
                             binding: 1,
-                            resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
-                                buffer: iteration_counts_in_buffer,
-                                offset: 0,
-                                size: None,
-                            }),
+                            resource: iteration_counts_in_buffer.binding_resource(0, None),
                         },
                     ],
                 });
