@@ -418,24 +418,6 @@ fn main() {
     let mut origin_changed = false;
 
     event_loop.run(move |event, _, control_flow| {
-        let (
-            compute_bind_group_1,
-            render_bind_group_1,
-            zoom,
-            origin,
-            cursor_position,
-            iteration_counts_buffers,
-            starting_values_buffers,
-        ) = (
-            &mut compute_bind_group_1,
-            &mut render_bind_group_1,
-            &mut zoom,
-            &mut origin,
-            &mut cursor_position,
-            &mut iteration_counts_buffers,
-            &mut starting_values_buffers,
-        );
-
         // To present frames in realtime, *don't* set `control_flow` to `Wait`.
         // control_flow.set_wait();
         match event {
@@ -456,7 +438,7 @@ fn main() {
                     button: winit::event::MouseButton::Left,
                     ..
                 } => {
-                    debug!("mouse pressed at {:?}", *cursor_position);
+                    debug!("mouse pressed at {:?}", cursor_position);
 
                     /*
                     when `zoom = 1.0`, we're viewing (-2, -2) to (2, 2).
@@ -466,8 +448,8 @@ fn main() {
                     A click at (cursor_x, cursor_y) corresponds to (4 * cursor_x / size.width - 2, 4 * cursor_y / size.height - 2)
                      */
 
-                    let zoom_inv = 2.0 / *zoom;
-                    *origin = Vec2 {
+                    let zoom_inv = 2.0 / zoom;
+                    origin = Vec2 {
                         x: origin.x
                             + (2.0 * zoom_inv * cursor_position.x / (size.width as f32) - zoom_inv),
                         y: origin.y
@@ -476,10 +458,10 @@ fn main() {
                     };
                     debug!("origin set to {:?}", origin);
                     origin_changed = true;
-                    origin_buffer.write(&queue, *origin);
+                    origin_buffer.write(&queue, origin);
                 }
                 WindowEvent::MouseWheel { delta, .. } => {
-                    *zoom += *zoom
+                    zoom += zoom
                         * 0.1
                         * match delta {
                             winit::event::MouseScrollDelta::LineDelta(_, delta) => delta,
@@ -488,7 +470,7 @@ fn main() {
                             }
                         };
                     zoom_changed = true;
-                    zoom_buffer.write(&queue, *zoom);
+                    zoom_buffer.write(&queue, zoom);
                 }
                 WindowEvent::Resized(size) => {
                     debug!("resizing to {:?}", size);
@@ -505,13 +487,13 @@ fn main() {
                     screen_size_buffer.write(&queue, screen_size);
 
                     std::mem::replace(
-                        iteration_counts_buffers,
+                        &mut iteration_counts_buffers,
                         create_iteration_counts_buffers(&device, screen_size),
                     )
                     .destroy();
 
                     std::mem::replace(
-                        starting_values_buffers,
+                        &mut starting_values_buffers,
                         create_starting_values_buffers(&device, screen_size),
                     )
                     .destroy();
@@ -519,7 +501,7 @@ fn main() {
                     current_iteration_count = 0;
                     total_iterations_buffer.write(&queue, 0);
 
-                    *compute_bind_group_1 = device.create_bind_group(&wgpu::BindGroupDescriptor {
+                    compute_bind_group_1 = device.create_bind_group(&wgpu::BindGroupDescriptor {
                         label: Some("compute-bind-group"),
                         layout: &compute_bind_group_layout_1,
                         entries: &[
@@ -541,7 +523,7 @@ fn main() {
                         ],
                     });
 
-                    *render_bind_group_1 = device.create_bind_group(&wgpu::BindGroupDescriptor {
+                    render_bind_group_1 = device.create_bind_group(&wgpu::BindGroupDescriptor {
                         label: Some("render-bind-group"),
                         layout: &render_pipeline.get_bind_group_layout(0),
                         entries: &[
@@ -654,7 +636,7 @@ fn main() {
                             |compute_pass| {
                                 compute_pass.set_pipeline(&compute_pipeline);
 
-                                compute_pass.set_bind_group(0, compute_bind_group_1, &[]);
+                                compute_pass.set_bind_group(0, &compute_bind_group_1, &[]);
                                 compute_pass.set_bind_group(1, &compute_bind_group_2, &[]);
 
                                 compute_pass.insert_debug_marker("mandelbrot");
@@ -684,7 +666,7 @@ fn main() {
                             },
                             |render_pass| {
                                 render_pass.set_pipeline(&render_pipeline);
-                                render_pass.set_bind_group(0, render_bind_group_1, &[]);
+                                render_pass.set_bind_group(0, &render_bind_group_1, &[]);
                                 render_pass.set_bind_group(1, &render_bind_group_2, &[]);
                                 render_pass.draw(0..4, 0..1);
                             },
