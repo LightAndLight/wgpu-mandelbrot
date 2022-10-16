@@ -4,6 +4,11 @@ mod command_encoder;
 mod double_buffered;
 mod var;
 
+use std::{
+    collections::HashMap,
+    sync::{Arc, Condvar, Mutex},
+};
+
 use bytemuck::{Pod, Zeroable};
 use log::debug;
 use winit::{
@@ -20,6 +25,22 @@ use double_buffered::DoubleBuffered;
 struct IterationCount {
     escaped: u32,
     value: u32,
+}
+
+#[repr(C)]
+#[derive(Pod, Zeroable, Clone, Copy, Debug)]
+struct ColourRange {
+    escaped: u32,
+    value: f32,
+}
+
+impl Default for ColourRange {
+    fn default() -> Self {
+        Self {
+            escaped: 0,
+            value: 0.0,
+        }
+    }
 }
 
 #[repr(C)]
@@ -43,12 +64,16 @@ fn create_iteration_counts_buffers(
     DoubleBuffered {
         input: buffer::Builder::new(&initial_iteration_counts)
             .with_label("iteration-counts-buffer-1")
-            .with_usage(wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::UNIFORM)
+            .with_usage(wgpu::BufferUsages::STORAGE)
+            .with_usage(wgpu::BufferUsages::UNIFORM)
+            .with_usage(wgpu::BufferUsages::MAP_READ)
             .create(device),
 
         output: buffer::Builder::new(&initial_iteration_counts)
             .with_label("iteration-counts-buffer-2")
-            .with_usage(wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::UNIFORM)
+            .with_usage(wgpu::BufferUsages::STORAGE)
+            .with_usage(wgpu::BufferUsages::UNIFORM)
+            .with_usage(wgpu::BufferUsages::MAP_READ)
             .create(device),
     }
 }
@@ -93,6 +118,64 @@ fn create_starting_values_buffers(
 struct Vec2 {
     x: f32,
     y: f32,
+}
+
+fn compute_colour_ranges(
+    iteration_counts: buffer::View<IterationCount>,
+    mut colour_ranges_out: buffer::ViewMut<ColourRange>,
+) {
+    let iteration_counts = &*iteration_counts;
+    let colour_ranges_out = &mut *colour_ranges_out;
+    debug_assert!(iteration_counts.len() == colour_ranges_out.len());
+
+    let mut samples: Vec<u32> = Vec::new();
+
+    let mut min_iteration_count = u32::MAX;
+    let mut max_iteration_count = 0;
+    for iteration_count in iteration_counts {
+        min_iteration_count = min_iteration_count.min(iteration_count.value);
+        max_iteration_count = max_iteration_count.min(iteration_count.value);
+        samples.push(iteration_count.value);
+    }
+
+    samples.sort();
+
+    let mut histogram: HashMap<u32, f32> = HashMap::new();
+
+    let total_samples = samples.len() as f32;
+    let mut sample_count = None;
+    for current_sample in samples {
+        match sample_count {
+            Some((previous_sample, previous_sample_count)) => {
+                if current_sample == previous_sample {
+                    sample_count = Some((previous_sample, previous_sample_count + 1));
+                } else {
+                    histogram.insert(
+                        previous_sample,
+                        previous_sample_count as f32 / total_samples,
+                    );
+                    sample_count = Some((current_sample, 1));
+                }
+            }
+            None => {
+                sample_count = Some((current_sample, 1));
+            }
+        }
+    }
+    if let Some((previous_sample, previous_sample_count)) = sample_count {
+        histogram.insert(
+            previous_sample,
+            previous_sample_count as f32 / total_samples,
+        );
+    }
+
+    for (iteration_count, colour_range) in iteration_counts.iter().zip(colour_ranges_out.iter_mut())
+    {
+        *colour_range = ColourRange {
+            escaped: iteration_count.escaped,
+            value: histogram.get(&iteration_count.value).copied().unwrap(),
+        };
+    }
 }
 
 fn main() {
@@ -269,20 +352,9 @@ fn main() {
         device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("render-bind-group-layout-2"),
             entries: &[
-                // shader.wgsl#total_iterations
+                // shader.wgsl#colour_ranges
                 wgpu::BindGroupLayoutEntry {
                     binding: 0,
-                    visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Uniform,
-                        has_dynamic_offset: false,
-                        min_binding_size: None,
-                    },
-                    count: None,
-                },
-                // shader.wgsl#iteration_counts
-                wgpu::BindGroupLayoutEntry {
-                    binding: 1,
                     visibility: wgpu::ShaderStages::FRAGMENT,
                     ty: wgpu::BindingType::Buffer {
                         ty: wgpu::BufferBindingType::Storage { read_only: true },
@@ -357,11 +429,6 @@ fn main() {
 
     let mut iteration_counts_buffers = create_iteration_counts_buffers(&device, screen_size);
 
-    let total_iterations_buffer = var::Builder::new(0_u32)
-        .with_label("total-iterations-buffer")
-        .with_usage(wgpu::BufferUsages::UNIFORM)
-        .create(&device);
-
     let mut starting_values_buffers = create_starting_values_buffers(&device, screen_size);
 
     let mut compute_bind_group_1 = device.create_bind_group(&wgpu::BindGroupDescriptor {
@@ -399,9 +466,17 @@ fn main() {
     });
 
     let mut cursor_position = Vec2 { x: 0.0, y: 0.0 };
-    let mut current_iteration_count = 0;
     let mut zoom_changed = false;
     let mut origin_changed = false;
+
+    let mut colour_ranges_buffer: buffer::Buffer<ColourRange> = buffer::Builder::new(
+        &std::iter::repeat(ColourRange::default())
+            .take((screen_size.width * screen_size.height) as usize)
+            .collect::<Vec<_>>(),
+    )
+    .with_usage(wgpu::BufferUsages::STORAGE)
+    .with_usage(wgpu::BufferUsages::MAP_WRITE)
+    .create(&device);
 
     event_loop.run(move |event, _, control_flow| {
         // To present frames in realtime, *don't* set `control_flow` to `Wait`.
@@ -484,8 +559,16 @@ fn main() {
                     )
                     .destroy();
 
-                    current_iteration_count = 0;
-                    total_iterations_buffer.write(&queue, 0);
+                    std::mem::replace(
+                        &mut colour_ranges_buffer,
+                        buffer::Builder::new(
+                            &std::iter::repeat(ColourRange::default())
+                                .take((screen_size.width * screen_size.height) as usize)
+                                .collect::<Vec<_>>(),
+                        )
+                        .create(&device),
+                    )
+                    .destroy();
 
                     compute_bind_group_1 = device.create_bind_group(&wgpu::BindGroupDescriptor {
                         label: Some("compute-bind-group"),
@@ -553,12 +636,7 @@ fn main() {
                     iteration_counts_buffers
                         .output
                         .write(&queue, &initial_iteration_counts);
-
-                    current_iteration_count = 0;
-                    total_iterations_buffer.write(&queue, 0);
                 }
-
-                total_iterations_buffer.write(&queue, current_iteration_count);
 
                 let surface_texture = surface.get_current_texture().unwrap();
 
@@ -597,20 +675,15 @@ fn main() {
                     label: Some("render-bind-group-2"),
                     layout: &render_pipeline.get_bind_group_layout(1),
                     entries: &[
-                        // shader.wgsl#total_iterations
+                        // shader.wgsl#colour_ranges
                         wgpu::BindGroupEntry {
                             binding: 0,
-                            resource: total_iterations_buffer.binding_resource(),
-                        },
-                        // shader.wgsl#iteration_counts
-                        wgpu::BindGroupEntry {
-                            binding: 1,
-                            resource: iteration_counts_buffers.input.binding_resource(0, None),
+                            resource: colour_ranges_buffer.binding_resource(0, None),
                         },
                     ],
                 });
 
-                let command_buffer = command_buffer::create(
+                let compute_command_buffer = command_buffer::create(
                     &device,
                     &wgpu::CommandEncoderDescriptor::default(),
                     |command_encoder| {
@@ -630,7 +703,41 @@ fn main() {
                             },
                         );
                         command_encoder.pop_debug_group();
+                    },
+                );
 
+                queue.submit([compute_command_buffer]);
+
+                let iteration_counts_slice = iteration_counts_buffers.output.slice(..);
+                let mut colour_ranges_slice = colour_ranges_buffer.slice(..);
+
+                {
+                    let mapped = Arc::new((Mutex::new(true), Condvar::new()));
+
+                    iteration_counts_slice.map_async(wgpu::MapMode::Read, {
+                        let mapped = mapped.clone();
+                        move |map_result| {
+                            map_result.unwrap_or_else(|err| panic!("buffer async error: {}", err));
+                            let mut guard = mapped.0.lock().unwrap();
+                            *guard = false;
+                            mapped.1.notify_all();
+                        }
+                    });
+
+                    let _guard = mapped
+                        .1
+                        .wait_while(mapped.0.lock().unwrap(), |pending| *pending)
+                        .unwrap();
+                }
+
+                let iteration_counts_view = iteration_counts_slice.get_mapped_range();
+                let colour_ranges_view = colour_ranges_slice.get_mapped_range_mut();
+                compute_colour_ranges(iteration_counts_view, colour_ranges_view);
+
+                let render_command_buffer = command_buffer::create(
+                    &device,
+                    &wgpu::CommandEncoderDescriptor::default(),
+                    |command_encoder| {
                         command_encoder.push_debug_group("render-pass");
                         command_encoder.with_render_pass(
                             &wgpu::RenderPassDescriptor {
@@ -661,12 +768,12 @@ fn main() {
                     },
                 );
 
-                queue.submit([command_buffer]);
+                queue.submit([render_command_buffer]);
+
                 surface_texture.present();
 
                 starting_values_buffers.swap();
                 iteration_counts_buffers.swap();
-                current_iteration_count += 1;
             }
             _ => {}
         }
