@@ -20,19 +20,19 @@ struct IterationCount {
     value: u32,
 }
 
-struct IterationCountsBuffers {
-    r#in: buffer::Buffer<IterationCount>,
-    out: buffer::Buffer<IterationCount>,
+struct DoubleBuffered<A> {
+    input: buffer::Buffer<A>,
+    output: buffer::Buffer<A>,
 }
 
-impl IterationCountsBuffers {
+impl<A: Pod + Zeroable> DoubleBuffered<A> {
     fn swap(&mut self) {
-        std::mem::swap(&mut self.r#in, &mut self.out)
+        std::mem::swap(&mut self.input, &mut self.output)
     }
 
     fn destroy(self) {
-        self.r#in.destroy();
-        self.out.destroy();
+        self.input.destroy();
+        self.output.destroy();
     }
 }
 
@@ -46,7 +46,7 @@ struct ScreenSize {
 fn create_iteration_counts_buffers(
     device: &wgpu::Device,
     size: ScreenSize,
-) -> IterationCountsBuffers {
+) -> DoubleBuffered<IterationCount> {
     let initial_iteration_counts = std::iter::repeat(IterationCount {
         escaped: 0,
         value: 0,
@@ -54,13 +54,13 @@ fn create_iteration_counts_buffers(
     .take((size.width * size.height) as usize)
     .collect::<Vec<_>>();
 
-    IterationCountsBuffers {
-        r#in: buffer::Builder::new(&initial_iteration_counts)
+    DoubleBuffered {
+        input: buffer::Builder::new(&initial_iteration_counts)
             .with_label("iteration-counts-buffer-1")
             .with_usage(wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::UNIFORM)
             .create(device),
 
-        out: buffer::Builder::new(&initial_iteration_counts)
+        output: buffer::Builder::new(&initial_iteration_counts)
             .with_label("iteration-counts-buffer-2")
             .with_usage(wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::UNIFORM)
             .create(device),
@@ -588,10 +588,10 @@ fn main() {
                     .take((size.width * size.height) as usize)
                     .collect::<Vec<_>>();
                     iteration_counts_buffers
-                        .r#in
+                        .input
                         .write(&queue, &initial_iteration_counts);
                     iteration_counts_buffers
-                        .out
+                        .output
                         .write(&queue, &initial_iteration_counts);
 
                     current_iteration_count = 0;
@@ -623,12 +623,12 @@ fn main() {
                         // compute.wgsl#iteration_counts_in
                         wgpu::BindGroupEntry {
                             binding: 2,
-                            resource: iteration_counts_buffers.r#in.binding_resource(0, None),
+                            resource: iteration_counts_buffers.input.binding_resource(0, None),
                         },
                         // compute.wgsl#iteration_counts_out
                         wgpu::BindGroupEntry {
                             binding: 3,
-                            resource: iteration_counts_buffers.out.binding_resource(0, None),
+                            resource: iteration_counts_buffers.output.binding_resource(0, None),
                         },
                     ],
                 });
@@ -645,7 +645,7 @@ fn main() {
                         // shader.wgsl#iteration_counts
                         wgpu::BindGroupEntry {
                             binding: 1,
-                            resource: iteration_counts_buffers.r#in.binding_resource(0, None),
+                            resource: iteration_counts_buffers.input.binding_resource(0, None),
                         },
                     ],
                 });
