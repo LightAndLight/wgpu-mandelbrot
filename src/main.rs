@@ -123,12 +123,13 @@ struct Vec2 {
 fn compute_colour_ranges(
     iteration_counts: buffer::View<IterationCount>,
     samples: &mut Vec<u32>,
-) -> Vec<ColourRange> {
+    colour_ranges_out: &mut Vec<ColourRange>,
+) {
     trace!("begin compute_colour_ranges");
 
     let iteration_counts = &*iteration_counts;
     samples.clear();
-    let mut colour_ranges_out = Vec::with_capacity(iteration_counts.len());
+    colour_ranges_out.clear();
 
     for iteration_count in iteration_counts {
         samples.push(iteration_count.value);
@@ -172,8 +173,6 @@ fn compute_colour_ranges(
     }
 
     trace!("end compute_colour_ranges");
-
-    colour_ranges_out
 }
 
 fn main() {
@@ -481,6 +480,7 @@ fn main() {
     .create(&device);
 
     let mut samples = Vec::new();
+    let mut colour_ranges = Vec::new();
 
     event_loop.run(move |event, _, control_flow| {
         // To present frames in realtime, *don't* set `control_flow` to `Wait`.
@@ -764,8 +764,11 @@ fn main() {
                 let iteration_counts_staging_buffer_view =
                     iteration_counts_staging_buffer_slice.get_mapped_range();
 
-                let colour_ranges =
-                    compute_colour_ranges(iteration_counts_staging_buffer_view, &mut samples);
+                compute_colour_ranges(
+                    iteration_counts_staging_buffer_view,
+                    &mut samples,
+                    &mut colour_ranges,
+                );
 
                 iteration_counts_staging_buffer.buffer().unmap();
 
