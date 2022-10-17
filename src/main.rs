@@ -148,10 +148,10 @@ fn compute_colour_ranges(
                 if *current_sample == previous_sample {
                     sample_count = Some((previous_sample, previous_sample_count + 1));
                 } else {
-                    histogram.insert(previous_sample, bucket_level);
-
                     let bucket_value = previous_sample_count as f32 / total_samples;
                     bucket_level += bucket_value;
+
+                    histogram.insert(previous_sample, bucket_level);
 
                     sample_count = Some((*current_sample, 1));
                 }
@@ -161,7 +161,9 @@ fn compute_colour_ranges(
             }
         }
     }
-    if let Some((previous_sample, _previous_sample_count)) = sample_count {
+    if let Some((previous_sample, previous_sample_count)) = sample_count {
+        let bucket_value = previous_sample_count as f32 / total_samples;
+        bucket_level += bucket_value;
         histogram.insert(previous_sample, bucket_level);
     }
 

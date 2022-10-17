@@ -17,25 +17,25 @@ struct ColourRange{escaped : u32, value : f32}
 @group(1) @binding(0) var<storage, read> colour_ranges : array<ColourRange>;
 
 fn compute_colour(colour_range : ColourRange) -> vec4<f32> {
+  let gamma = vec3<f32>(2.2, 2.2, 2.2);
+  let initial_colour = vec3<f32>(15.0 / 255.0, 66.0 / 255.0, 7.0 / 255.0);
+  
   if colour_range.escaped == 1u {
-
-    let initial_r = 15.0 / 255.0;
-    let initial_g = 66.0 / 255.0;
-    let initial_b = 7.0 / 255.0;
-    let final_rgb = 180.0 / 255.0;
+    // let final_colour = vec3<f32>(200.0 / 255.0, 200.0 / 255.0, 200.0 / 255.0);
+    let final_colour = vec3<f32>(1.0, 1.0, 1.0);
     return vec4<f32>(
-      pow(initial_r + (1.0 - initial_r) * colour_range.value, 2.2),
-      pow(initial_g + (1.0 - initial_g) * colour_range.value, 2.2),
-      pow(initial_b + (1.0 - initial_b) * colour_range.value, 2.2),
+      pow(
+        vec3<f32>(
+          initial_colour.r + (final_colour.r - initial_colour.r) * colour_range.value,
+          initial_colour.g + (final_colour.g - initial_colour.g) * colour_range.value,
+          initial_colour.b + (final_colour.b - initial_colour.b) * colour_range.value
+        ), 
+        gamma
+      ),
       1.0
     );
   } else {
-    return vec4<f32>(
-      pow(15.0 / 255.0, 2.2),
-      pow(66.0 / 255.0, 2.2),
-      pow(7.0 / 255.0, 2.2),
-      1.0
-    );
+    return vec4<f32>(pow(initial_colour, gamma), 1.0);
   }
 }
 
