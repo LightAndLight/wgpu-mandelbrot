@@ -1,5 +1,6 @@
 use std::{
     marker::PhantomData,
+    mem::size_of,
     num::NonZeroU64,
     ops::{Deref, DerefMut, RangeBounds},
 };
@@ -14,6 +15,10 @@ pub struct Buffer<A> {
 impl<A: bytemuck::Pod + bytemuck::Zeroable> Buffer<A> {
     pub fn write(&self, queue: &wgpu::Queue, contents: &[A]) {
         queue.write_buffer(&self.buffer, 0, bytemuck::cast_slice(contents));
+    }
+
+    pub fn buffer(&self) -> &wgpu::Buffer {
+        &self.buffer
     }
 
     pub fn slice<S: RangeBounds<wgpu::BufferAddress>>(&self, bounds: S) -> Slice<A> {
@@ -97,18 +102,32 @@ impl<'a, A: bytemuck::Pod + bytemuck::Zeroable> DerefMut for ViewMut<'a, A> {
     }
 }
 
+enum Contents<'a> {
+    Contents(&'a [u8]),
+    Size(u64),
+}
+
 pub struct Builder<'a, A> {
     label: Option<&'a str>,
-    contents: &'a [u8],
+    contents: Contents<'a>,
     usage: wgpu::BufferUsages,
     phantom_data: PhantomData<A>,
 }
 
 impl<'a, A: bytemuck::Pod + bytemuck::Zeroable> Builder<'a, A> {
-    pub fn new(contents: &'a [A]) -> Self {
+    pub fn from_contents(contents: &'a [A]) -> Self {
         Self {
             label: None,
-            contents: bytemuck::cast_slice(contents),
+            contents: Contents::Contents(bytemuck::cast_slice(contents)),
+            usage: wgpu::BufferUsages::COPY_DST,
+            phantom_data: PhantomData,
+        }
+    }
+
+    pub fn new(size: u64) -> Self {
+        Self {
+            label: None,
+            contents: Contents::Size(size),
             usage: wgpu::BufferUsages::COPY_DST,
             phantom_data: PhantomData,
         }
@@ -125,11 +144,21 @@ impl<'a, A: bytemuck::Pod + bytemuck::Zeroable> Builder<'a, A> {
     }
 
     pub fn create(self, device: &wgpu::Device) -> Buffer<A> {
-        let buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: self.label,
-            contents: self.contents,
-            usage: self.usage,
-        });
+        let buffer = match self.contents {
+            Contents::Contents(contents) => {
+                device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: self.label,
+                    contents,
+                    usage: self.usage,
+                })
+            }
+            Contents::Size(size) => device.create_buffer(&wgpu::BufferDescriptor {
+                label: self.label,
+                size: size * size_of::<A>() as u64,
+                usage: self.usage,
+                mapped_at_creation: false,
+            }),
+        };
 
         Buffer {
             buffer,

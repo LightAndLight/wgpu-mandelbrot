@@ -10,7 +10,7 @@ use std::{
 };
 
 use bytemuck::{Pod, Zeroable};
-use log::debug;
+use log::{debug, trace};
 use winit::{
     event::{Event, WindowEvent},
     event_loop::{ControlFlow, EventLoop},
@@ -62,18 +62,18 @@ fn create_iteration_counts_buffers(
     .collect::<Vec<_>>();
 
     DoubleBuffered {
-        input: buffer::Builder::new(&initial_iteration_counts)
+        input: buffer::Builder::from_contents(&initial_iteration_counts)
             .with_label("iteration-counts-buffer-1")
             .with_usage(wgpu::BufferUsages::STORAGE)
             .with_usage(wgpu::BufferUsages::UNIFORM)
-            .with_usage(wgpu::BufferUsages::MAP_READ)
+            .with_usage(wgpu::BufferUsages::COPY_SRC)
             .create(device),
 
-        output: buffer::Builder::new(&initial_iteration_counts)
+        output: buffer::Builder::from_contents(&initial_iteration_counts)
             .with_label("iteration-counts-buffer-2")
             .with_usage(wgpu::BufferUsages::STORAGE)
             .with_usage(wgpu::BufferUsages::UNIFORM)
-            .with_usage(wgpu::BufferUsages::MAP_READ)
+            .with_usage(wgpu::BufferUsages::COPY_SRC)
             .create(device),
     }
 }
@@ -101,12 +101,12 @@ fn create_starting_values_buffers(
         .collect::<Vec<_>>();
 
     DoubleBuffered {
-        input: buffer::Builder::new(&initial_starting_values)
+        input: buffer::Builder::from_contents(&initial_starting_values)
             .with_label("starting-values-buffer-1")
             .with_usage(wgpu::BufferUsages::STORAGE)
             .create(device),
 
-        output: buffer::Builder::new(&initial_starting_values)
+        output: buffer::Builder::from_contents(&initial_starting_values)
             .with_label("starting-values-buffer-2")
             .with_usage(wgpu::BufferUsages::STORAGE)
             .create(device),
@@ -120,13 +120,9 @@ struct Vec2 {
     y: f32,
 }
 
-fn compute_colour_ranges(
-    iteration_counts: buffer::View<IterationCount>,
-    mut colour_ranges_out: buffer::ViewMut<ColourRange>,
-) {
+fn compute_colour_ranges(iteration_counts: buffer::View<IterationCount>) -> Vec<ColourRange> {
     let iteration_counts = &*iteration_counts;
-    let colour_ranges_out = &mut *colour_ranges_out;
-    debug_assert!(iteration_counts.len() == colour_ranges_out.len());
+    let mut colour_ranges_out = Vec::with_capacity(iteration_counts.len());
 
     let mut samples: Vec<u32> = Vec::new();
 
@@ -169,13 +165,14 @@ fn compute_colour_ranges(
         );
     }
 
-    for (iteration_count, colour_range) in iteration_counts.iter().zip(colour_ranges_out.iter_mut())
-    {
-        *colour_range = ColourRange {
+    for iteration_count in iteration_counts.iter() {
+        colour_ranges_out.push(ColourRange {
             escaped: iteration_count.escaped,
             value: histogram.get(&iteration_count.value).copied().unwrap(),
-        };
+        });
     }
+
+    colour_ranges_out
 }
 
 fn main() {
@@ -403,7 +400,7 @@ fn main() {
         multiview: None,
     });
 
-    let screen_size = ScreenSize {
+    let mut screen_size = ScreenSize {
         width: size.width as u32,
         height: size.height as u32,
     };
@@ -428,6 +425,11 @@ fn main() {
         .create(&device);
 
     let mut iteration_counts_buffers = create_iteration_counts_buffers(&device, screen_size);
+    let mut iteration_counts_staging_buffer =
+        buffer::Builder::new((screen_size.width * screen_size.height) as u64)
+            .with_label("iteration_counts_staging_buffer")
+            .with_usage(wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ)
+            .create(&device);
 
     let mut starting_values_buffers = create_starting_values_buffers(&device, screen_size);
 
@@ -469,13 +471,12 @@ fn main() {
     let mut zoom_changed = false;
     let mut origin_changed = false;
 
-    let mut colour_ranges_buffer: buffer::Buffer<ColourRange> = buffer::Builder::new(
+    let mut colour_ranges_buffer: buffer::Buffer<ColourRange> = buffer::Builder::from_contents(
         &std::iter::repeat(ColourRange::default())
             .take((screen_size.width * screen_size.height) as usize)
             .collect::<Vec<_>>(),
     )
     .with_usage(wgpu::BufferUsages::STORAGE)
-    .with_usage(wgpu::BufferUsages::MAP_WRITE)
     .create(&device);
 
     event_loop.run(move |event, _, control_flow| {
@@ -541,7 +542,7 @@ fn main() {
 
                     surface.configure(&device, &surface_configuration);
 
-                    let screen_size = ScreenSize {
+                    screen_size = ScreenSize {
                         width: size.width as u32,
                         height: size.height as u32,
                     };
@@ -552,6 +553,11 @@ fn main() {
                         create_iteration_counts_buffers(&device, screen_size),
                     )
                     .destroy();
+                    iteration_counts_staging_buffer =
+                        buffer::Builder::new((screen_size.width * screen_size.height) as u64)
+                            .with_label("iteration_counts_staging_buffer")
+                            .with_usage(wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ)
+                            .create(&device);
 
                     std::mem::replace(
                         &mut starting_values_buffers,
@@ -561,11 +567,12 @@ fn main() {
 
                     std::mem::replace(
                         &mut colour_ranges_buffer,
-                        buffer::Builder::new(
+                        buffer::Builder::from_contents(
                             &std::iter::repeat(ColourRange::default())
                                 .take((screen_size.width * screen_size.height) as usize)
                                 .collect::<Vec<_>>(),
                         )
+                        .with_usage(wgpu::BufferUsages::STORAGE)
                         .create(&device),
                     )
                     .destroy();
@@ -703,20 +710,32 @@ fn main() {
                             },
                         );
                         command_encoder.pop_debug_group();
+
+                        command_encoder.copy_buffer_to_buffer(
+                            iteration_counts_buffers.output.buffer(),
+                            0,
+                            iteration_counts_staging_buffer.buffer(),
+                            0,
+                            (std::mem::size_of::<IterationCount>()
+                                * screen_size.width as usize
+                                * screen_size.height as usize) as u64,
+                        );
                     },
                 );
 
                 queue.submit([compute_command_buffer]);
 
-                let iteration_counts_slice = iteration_counts_buffers.output.slice(..);
-                let mut colour_ranges_slice = colour_ranges_buffer.slice(..);
+                let iteration_counts_staging_buffer_slice =
+                    iteration_counts_staging_buffer.slice(..);
 
                 {
+                    trace!("waiting for staging buffer");
                     let mapped = Arc::new((Mutex::new(true), Condvar::new()));
 
-                    iteration_counts_slice.map_async(wgpu::MapMode::Read, {
+                    iteration_counts_staging_buffer_slice.map_async(wgpu::MapMode::Read, {
                         let mapped = mapped.clone();
                         move |map_result| {
+                            debug!("map_async callback called");
                             map_result.unwrap_or_else(|err| panic!("buffer async error: {}", err));
                             let mut guard = mapped.0.lock().unwrap();
                             *guard = false;
@@ -724,15 +743,29 @@ fn main() {
                         }
                     });
 
+                    {
+                        let device = Arc::from(&device);
+                        std::thread::scope(|scope| {
+                            scope.spawn(|| while !device.poll(wgpu::Maintain::Poll) {});
+                        });
+                    }
+
+                    trace!("waiting for condition");
                     let _guard = mapped
                         .1
                         .wait_while(mapped.0.lock().unwrap(), |pending| *pending)
                         .unwrap();
+                    trace!("staging buffer mapped");
                 }
 
-                let iteration_counts_view = iteration_counts_slice.get_mapped_range();
-                let colour_ranges_view = colour_ranges_slice.get_mapped_range_mut();
-                compute_colour_ranges(iteration_counts_view, colour_ranges_view);
+                let iteration_counts_staging_buffer_view =
+                    iteration_counts_staging_buffer_slice.get_mapped_range();
+
+                let colour_ranges = compute_colour_ranges(iteration_counts_staging_buffer_view);
+
+                iteration_counts_staging_buffer.buffer().unmap();
+
+                colour_ranges_buffer.write(&queue, &colour_ranges);
 
                 let render_command_buffer = command_buffer::create(
                     &device,
