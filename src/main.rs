@@ -140,16 +140,17 @@ fn compute_colour_ranges(iteration_counts: buffer::View<IterationCount>) -> Vec<
 
     let total_samples = samples.len() as f32;
     let mut sample_count = None;
+    let mut bucket_level: f32 = 0.0;
     for current_sample in samples {
         match sample_count {
             Some((previous_sample, previous_sample_count)) => {
                 if current_sample == previous_sample {
                     sample_count = Some((previous_sample, previous_sample_count + 1));
                 } else {
-                    histogram.insert(
-                        previous_sample,
-                        previous_sample_count as f32 / total_samples,
-                    );
+                    histogram.insert(previous_sample, bucket_level);
+                    let bucket_value = previous_sample_count as f32 / total_samples;
+                    bucket_level += bucket_value;
+
                     sample_count = Some((current_sample, 1));
                 }
             }
