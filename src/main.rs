@@ -120,17 +120,17 @@ struct Vec2 {
     y: f32,
 }
 
-fn compute_colour_ranges(iteration_counts: buffer::View<IterationCount>) -> Vec<ColourRange> {
+fn compute_colour_ranges(
+    iteration_counts: buffer::View<IterationCount>,
+    samples: &mut Vec<u32>,
+) -> Vec<ColourRange> {
+    trace!("begin compute_colour_ranges");
+
     let iteration_counts = &*iteration_counts;
+    samples.clear();
     let mut colour_ranges_out = Vec::with_capacity(iteration_counts.len());
 
-    let mut samples: Vec<u32> = Vec::new();
-
-    let mut min_iteration_count = u32::MAX;
-    let mut max_iteration_count = 0;
     for iteration_count in iteration_counts {
-        min_iteration_count = min_iteration_count.min(iteration_count.value);
-        max_iteration_count = max_iteration_count.min(iteration_count.value);
         samples.push(iteration_count.value);
     }
 
@@ -144,26 +144,24 @@ fn compute_colour_ranges(iteration_counts: buffer::View<IterationCount>) -> Vec<
     for current_sample in samples {
         match sample_count {
             Some((previous_sample, previous_sample_count)) => {
-                if current_sample == previous_sample {
+                if *current_sample == previous_sample {
                     sample_count = Some((previous_sample, previous_sample_count + 1));
                 } else {
                     histogram.insert(previous_sample, bucket_level);
+
                     let bucket_value = previous_sample_count as f32 / total_samples;
                     bucket_level += bucket_value;
 
-                    sample_count = Some((current_sample, 1));
+                    sample_count = Some((*current_sample, 1));
                 }
             }
             None => {
-                sample_count = Some((current_sample, 1));
+                sample_count = Some((*current_sample, 1));
             }
         }
     }
-    if let Some((previous_sample, previous_sample_count)) = sample_count {
-        histogram.insert(
-            previous_sample,
-            previous_sample_count as f32 / total_samples,
-        );
+    if let Some((previous_sample, _previous_sample_count)) = sample_count {
+        histogram.insert(previous_sample, bucket_level);
     }
 
     for iteration_count in iteration_counts.iter() {
@@ -172,6 +170,8 @@ fn compute_colour_ranges(iteration_counts: buffer::View<IterationCount>) -> Vec<
             value: histogram.get(&iteration_count.value).copied().unwrap(),
         });
     }
+
+    trace!("end compute_colour_ranges");
 
     colour_ranges_out
 }
@@ -480,6 +480,8 @@ fn main() {
     .with_usage(wgpu::BufferUsages::STORAGE)
     .create(&device);
 
+    let mut samples = Vec::new();
+
     event_loop.run(move |event, _, control_flow| {
         // To present frames in realtime, *don't* set `control_flow` to `Wait`.
         // control_flow.set_wait();
@@ -762,7 +764,8 @@ fn main() {
                 let iteration_counts_staging_buffer_view =
                     iteration_counts_staging_buffer_slice.get_mapped_range();
 
-                let colour_ranges = compute_colour_ranges(iteration_counts_staging_buffer_view);
+                let colour_ranges =
+                    compute_colour_ranges(iteration_counts_staging_buffer_view, &mut samples);
 
                 iteration_counts_staging_buffer.buffer().unmap();
 
@@ -802,6 +805,7 @@ fn main() {
                     },
                 );
 
+                trace!("submitting render commands");
                 queue.submit([render_command_buffer]);
 
                 surface_texture.present();
