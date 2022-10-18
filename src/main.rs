@@ -122,6 +122,7 @@ fn compute_colour_ranges(
     iteration_counts: buffer::View<IterationCount>,
     samples: &mut Vec<u32>,
     colour_ranges_out: &mut Vec<ColourRange>,
+    bucket_labels: &mut Vec<u32>,
     histogram: &mut FnvHashMap<u32, f32>,
 ) {
     trace!("begin compute_colour_ranges");
@@ -129,6 +130,7 @@ fn compute_colour_ranges(
     let iteration_counts = &*iteration_counts;
     samples.clear();
     colour_ranges_out.clear();
+    bucket_labels.clear();
     histogram.clear();
 
     for iteration_count in iteration_counts {
@@ -139,7 +141,6 @@ fn compute_colour_ranges(
 
     let total_samples = samples.len() as f32;
 
-    let mut bucket_labels: Vec<u32> = Vec::new();
     for current_sample in samples {
         let value = histogram.entry(*current_sample).or_insert_with(|| {
             bucket_labels.push(*current_sample);
@@ -162,7 +163,7 @@ fn compute_colour_ranges(
 
     let mut bucket_level = 0.0;
     for bucket_label in bucket_labels {
-        let bucket_value = histogram.get_mut(&bucket_label).unwrap();
+        let bucket_value = histogram.get_mut(bucket_label).unwrap();
 
         let old_bucket_level = bucket_level;
         bucket_level = old_bucket_level + *bucket_value / total_samples;
@@ -490,6 +491,7 @@ fn main() {
 
     let mut samples = Vec::new();
     let mut colour_ranges = Vec::new();
+    let mut bucket_labels = Vec::new();
     let mut histogram = FnvHashMap::default();
 
     event_loop.run(move |event, _, control_flow| {
@@ -780,6 +782,7 @@ fn main() {
                     iteration_counts_staging_buffer_view,
                     &mut samples,
                     &mut colour_ranges,
+                    &mut bucket_labels,
                     &mut histogram,
                 );
                 debug_assert!(
