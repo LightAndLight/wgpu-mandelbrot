@@ -8,6 +8,7 @@ edition = "2021"
 [dependencies]
 bytemuck = { version = "1.12.1", features = ["derive"] }
 env_logger = "0.9.1"
+fnv = "1.0.7"
 log = "0.4.17"
 pollster = "0.2.5"
 wgpu = "0.14.0"

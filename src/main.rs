@@ -4,12 +4,10 @@ mod command_encoder;
 mod double_buffered;
 mod var;
 
-use std::{
-    collections::HashMap,
-    sync::{Arc, Condvar, Mutex},
-};
+use std::sync::{Arc, Condvar, Mutex};
 
 use bytemuck::{Pod, Zeroable};
+use fnv::{FnvHashMap, FnvHashSet};
 use log::{debug, trace};
 use winit::{
     event::{Event, WindowEvent},
@@ -124,53 +122,62 @@ fn compute_colour_ranges(
     iteration_counts: buffer::View<IterationCount>,
     samples: &mut Vec<u32>,
     colour_ranges_out: &mut Vec<ColourRange>,
+    histogram: &mut FnvHashMap<u32, f32>,
 ) {
     trace!("begin compute_colour_ranges");
 
     let iteration_counts = &*iteration_counts;
     samples.clear();
     colour_ranges_out.clear();
+    histogram.clear();
 
     for iteration_count in iteration_counts {
-        samples.push(iteration_count.value);
-    }
-
-    samples.sort();
-
-    let mut histogram: HashMap<u32, f32> = HashMap::new();
-
-    let total_samples = samples.len() as f32;
-    let mut sample_count = None;
-    let mut bucket_level: f32 = 0.0;
-    for current_sample in samples {
-        match sample_count {
-            Some((previous_sample, previous_sample_count)) => {
-                if *current_sample == previous_sample {
-                    sample_count = Some((previous_sample, previous_sample_count + 1));
-                } else {
-                    let bucket_value = previous_sample_count as f32 / total_samples;
-                    bucket_level += bucket_value;
-
-                    histogram.insert(previous_sample, bucket_level);
-
-                    sample_count = Some((*current_sample, 1));
-                }
-            }
-            None => {
-                sample_count = Some((*current_sample, 1));
-            }
+        if iteration_count.escaped == 1 {
+            samples.push(iteration_count.value);
         }
     }
-    if let Some((previous_sample, previous_sample_count)) = sample_count {
-        let bucket_value = previous_sample_count as f32 / total_samples;
-        bucket_level += bucket_value;
-        histogram.insert(previous_sample, bucket_level);
+
+    let total_samples = samples.len() as f32;
+
+    let mut bucket_labels: Vec<u32> = Vec::new();
+    for current_sample in samples {
+        let value = histogram.entry(*current_sample).or_insert_with(|| {
+            bucket_labels.push(*current_sample);
+            0.0
+        });
+        *value += 1.0;
+    }
+
+    debug_assert!(
+        bucket_labels.len()
+            == bucket_labels
+                .iter()
+                .copied()
+                .collect::<FnvHashSet<u32>>()
+                .len(),
+        "bucket_labels contains duplicates: {:?}",
+        bucket_labels
+    );
+    bucket_labels.sort();
+
+    let mut bucket_level = 0.0;
+    for bucket_label in bucket_labels {
+        let bucket_value = histogram.get_mut(&bucket_label).unwrap();
+
+        let old_bucket_level = bucket_level;
+        bucket_level = old_bucket_level + *bucket_value / total_samples;
+
+        *bucket_value = old_bucket_level;
     }
 
     for iteration_count in iteration_counts.iter() {
         colour_ranges_out.push(ColourRange {
             escaped: iteration_count.escaped,
-            value: histogram.get(&iteration_count.value).copied().unwrap(),
+            value: if iteration_count.escaped == 1 {
+                histogram.get(&iteration_count.value).copied().unwrap()
+            } else {
+                0.0
+            },
         });
     }
 
@@ -185,7 +192,7 @@ fn main() {
 
     let instance = wgpu::Instance::new(wgpu::Backends::all());
 
-    let size = window.inner_size();
+    let mut size = window.inner_size();
     let surface = unsafe { instance.create_surface(&window) };
 
     let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
@@ -483,6 +490,7 @@ fn main() {
 
     let mut samples = Vec::new();
     let mut colour_ranges = Vec::new();
+    let mut histogram = FnvHashMap::default();
 
     event_loop.run(move |event, _, control_flow| {
         // To present frames in realtime, *don't* set `control_flow` to `Wait`.
@@ -539,8 +547,9 @@ fn main() {
                     zoom_changed = true;
                     zoom_buffer.write(&queue, zoom);
                 }
-                WindowEvent::Resized(size) => {
-                    debug!("resizing to {:?}", size);
+                WindowEvent::Resized(new_size) => {
+                    debug!("resizing to {:?}", new_size);
+                    size = new_size;
 
                     surface_configuration.width = size.width;
                     surface_configuration.height = size.height;
@@ -651,7 +660,6 @@ fn main() {
                 }
 
                 let surface_texture = surface.get_current_texture().unwrap();
-
                 let surface_texture_view = surface_texture
                     .texture
                     .create_view(&wgpu::TextureViewDescriptor::default());
@@ -723,7 +731,9 @@ fn main() {
                             0,
                             (std::mem::size_of::<IterationCount>()
                                 * screen_size.width as usize
-                                * screen_size.height as usize) as u64,
+                                * screen_size.height as usize)
+                                .try_into()
+                                .unwrap(),
                         );
                     },
                 );
@@ -770,6 +780,10 @@ fn main() {
                     iteration_counts_staging_buffer_view,
                     &mut samples,
                     &mut colour_ranges,
+                    &mut histogram,
+                );
+                debug_assert!(
+                    colour_ranges.len() == screen_size.width as usize * screen_size.height as usize
                 );
 
                 iteration_counts_staging_buffer.buffer().unmap();
