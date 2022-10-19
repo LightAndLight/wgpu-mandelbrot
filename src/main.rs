@@ -4,11 +4,21 @@ mod command_encoder;
 mod double_buffered;
 mod var;
 
-use std::sync::{Arc, Condvar, Mutex};
+use std::{
+    sync::{Arc, Condvar, Mutex},
+    time::Instant,
+};
 
 use bytemuck::{Pod, Zeroable};
 use fnv::{FnvHashMap, FnvHashSet};
 use log::{debug, trace};
+use rayon::{
+    prelude::{
+        IndexedParallelIterator, IntoParallelRefIterator, IntoParallelRefMutIterator,
+        ParallelIterator,
+    },
+    ThreadPoolBuilder,
+};
 use winit::{
     event::{Event, WindowEvent},
     event_loop::{ControlFlow, EventLoop},
@@ -171,22 +181,33 @@ fn compute_colour_ranges(
         *bucket_value = old_bucket_level;
     }
 
-    for iteration_count in iteration_counts.iter() {
-        colour_ranges_out.push(ColourRange {
-            escaped: iteration_count.escaped,
-            value: if iteration_count.escaped == 1 {
-                histogram.get(&iteration_count.value).copied().unwrap()
-            } else {
-                0.0
-            },
+    colour_ranges_out
+        .extend(std::iter::repeat(ColourRange::default()).take(iteration_counts.len()));
+    colour_ranges_out
+        .par_iter_mut()
+        .enumerate()
+        .for_each(|(index, colour_range)| {
+            let iteration_count = iteration_counts[index];
+            *colour_range = ColourRange {
+                escaped: iteration_count.escaped,
+                value: if iteration_count.escaped == 1 {
+                    histogram.get(&iteration_count.value).copied().unwrap()
+                } else {
+                    0.0
+                },
+            };
         });
-    }
 
     trace!("end compute_colour_ranges");
 }
 
 fn main() {
     env_logger::init();
+
+    ThreadPoolBuilder::new()
+        .num_threads(4)
+        .build_global()
+        .unwrap();
 
     let event_loop = EventLoop::new();
     let window = WindowBuilder::new().build(&event_loop).unwrap();
@@ -778,6 +799,7 @@ fn main() {
                 let iteration_counts_staging_buffer_view =
                     iteration_counts_staging_buffer_slice.get_mapped_range();
 
+                let now = Instant::now();
                 compute_colour_ranges(
                     iteration_counts_staging_buffer_view,
                     &mut samples,
@@ -788,6 +810,7 @@ fn main() {
                 debug_assert!(
                     colour_ranges.len() == screen_size.width as usize * screen_size.height as usize
                 );
+                debug!("took {:?}ms", now.elapsed().as_millis());
 
                 iteration_counts_staging_buffer.buffer().unmap();
 

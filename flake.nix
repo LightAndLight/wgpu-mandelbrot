@@ -39,6 +39,7 @@
               pkgs.renderdoc
               pkgs.valgrind
               pkgs.kcachegrind
+              pkgs.linuxPackages_latest.perf
             ];
 
             VK_INSTANCE_LAYERS = "VK_LAYER_KHRONOS_validation:VK_EXT_swapchain_colorspace";
