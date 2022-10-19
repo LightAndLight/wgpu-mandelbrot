@@ -24,7 +24,13 @@ fn length_complex(value: Complex) -> f32 {
 
 let ESCAPE_THRESHOLD: f32 = 2.0;
 
-struct IterationCount{escaped : u32, value : u32}
+struct Pixel{
+  x : u32,
+  y : u32,
+  current_value : Complex,
+  escaped : u32,
+  iteration_count : u32
+}
 
 /*
 From [Wikipedia](https://en.wikipedia.org/wiki/Mandelbrot_set)
@@ -54,16 +60,18 @@ on the screen, and sample the results texture for its color.
 // Center the image on `origin`,
 @group(0) @binding(2) var<uniform> origin : vec2<f32>;
 
-@group(1) @binding(0) var<storage, read> starting_values_in : array<Complex>;
-@group(1) @binding(1) var<storage, read_write> starting_values_out : array<Complex>;
-@group(1) @binding(2) var<storage, read> iteration_counts_in : array<IterationCount>;
-@group(1) @binding(3) var<storage, read_write> iteration_counts_out : array<IterationCount>;
+@group(1) @binding(0) var<storage, read> input : array<Pixel>;
+@group(1) @binding(1) var<storage, read_write> output : array<Pixel>;
 
 @compute @workgroup_size(64)
 fn mandelbrot(@builtin(global_invocation_id) global_invocation_id: vec3<u32>) {
-  let x = global_invocation_id.x;
-  let y = global_invocation_id.y;
-
+  let index = global_invocation_id.x * 65536u + global_invocation_id.y;
+  
+  let pixel = input[index];
+  
+  let x = pixel.x;
+  let y = pixel.y;
+  
   let zoom_inv = 2.0 / zoom;
 
   var c = Complex(
@@ -71,8 +79,7 @@ fn mandelbrot(@builtin(global_invocation_id) global_invocation_id: vec3<u32>) {
     2.0 * zoom_inv * f32(y) / f32(screen_size.y) - zoom_inv + origin.y
   );
 
-  let index = y * screen_size.x + x;
-  var starting_value : Complex = starting_values_in[index];
+  let starting_value : Complex = pixel.current_value;
 
   // conditions:
   // 
@@ -105,12 +112,12 @@ fn mandelbrot(@builtin(global_invocation_id) global_invocation_id: vec3<u32>) {
   //   escaped == u32(1.0 - 1.0)
   //   escaped == u32(0.0)
   //   escaped == 0u
-  iteration_counts_out[index].escaped =
+  output[index].escaped =
     u32(1.0 - sign(escape_threshold_minus_length_max_0));
 
-  let escaped_last_iteration : u32 = iteration_counts_in[index].escaped;
-  iteration_counts_out[index].value =
-    iteration_counts_in[index].value +
+  let escaped_last_iteration : u32 = pixel.escaped;
+  output[index].iteration_count =
+    pixel.iteration_count +
     // Add nothing when the point has already escaped,
     // add 1 when the point hasn't escaped.
     //
@@ -122,7 +129,7 @@ fn mandelbrot(@builtin(global_invocation_id) global_invocation_id: vec3<u32>) {
     (1u - escaped_last_iteration);
 
   let escaped_last_iteration : f32 = f32(escaped_last_iteration);
-  starting_values_out[index] =
+  output[index].current_value =
     // set to `starting_value` when the point has escaped.
     // set to `add_complex(multiply_complex(starting_value, starting_value), c)`
     add_complex(

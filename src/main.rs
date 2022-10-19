@@ -12,13 +12,7 @@ use std::{
 use bytemuck::{Pod, Zeroable};
 use fnv::{FnvHashMap, FnvHashSet};
 use log::{debug, trace};
-use rayon::{
-    prelude::{
-        IndexedParallelIterator, IntoParallelRefIterator, IntoParallelRefMutIterator,
-        ParallelIterator,
-    },
-    ThreadPoolBuilder,
-};
+use rayon::ThreadPoolBuilder;
 use winit::{
     event::{Event, WindowEvent},
     event_loop::{ControlFlow, EventLoop},
@@ -27,13 +21,6 @@ use winit::{
 
 use command_encoder::CommandEncoderExt;
 use double_buffered::DoubleBuffered;
-
-#[repr(C)]
-#[derive(Pod, Zeroable, Clone, Copy, Debug)]
-struct IterationCount {
-    escaped: u32,
-    value: u32,
-}
 
 #[repr(C)]
 #[derive(Pod, Zeroable, Clone, Copy, Debug)]
@@ -58,34 +45,6 @@ struct ScreenSize {
     height: u32,
 }
 
-fn create_iteration_counts_buffers(
-    device: &wgpu::Device,
-    size: ScreenSize,
-) -> DoubleBuffered<IterationCount> {
-    let initial_iteration_counts = std::iter::repeat(IterationCount {
-        escaped: 0,
-        value: 0,
-    })
-    .take((size.width * size.height) as usize)
-    .collect::<Vec<_>>();
-
-    DoubleBuffered {
-        input: buffer::Builder::from_contents(&initial_iteration_counts)
-            .with_label("iteration-counts-buffer-1")
-            .with_usage(wgpu::BufferUsages::STORAGE)
-            .with_usage(wgpu::BufferUsages::UNIFORM)
-            .with_usage(wgpu::BufferUsages::COPY_SRC)
-            .create(device),
-
-        output: buffer::Builder::from_contents(&initial_iteration_counts)
-            .with_label("iteration-counts-buffer-2")
-            .with_usage(wgpu::BufferUsages::STORAGE)
-            .with_usage(wgpu::BufferUsages::UNIFORM)
-            .with_usage(wgpu::BufferUsages::COPY_SRC)
-            .create(device),
-    }
-}
-
 #[repr(C)]
 #[derive(Pod, Zeroable, Clone, Copy)]
 struct Complex {
@@ -100,23 +59,44 @@ impl Complex {
     };
 }
 
-fn create_starting_values_buffers(
-    device: &wgpu::Device,
-    size: ScreenSize,
-) -> DoubleBuffered<Complex> {
-    let initial_starting_values = std::iter::repeat(Complex::ZERO)
-        .take((size.width * size.height) as usize)
-        .collect::<Vec<_>>();
+#[repr(C)]
+#[derive(Pod, Zeroable, Clone, Copy)]
+struct Pixel {
+    x: u32,
+    y: u32,
+    current_value: Complex,
+    escaped: u32,
+    iteration_count: u32,
+}
+
+fn create_pixels(size: ScreenSize) -> Vec<Pixel> {
+    (0..size.height)
+        .flat_map(move |y| {
+            (0..size.width).map(move |x| Pixel {
+                x: x as u32,
+                y: y as u32,
+                current_value: Complex::ZERO,
+                escaped: 0,
+                iteration_count: 0,
+            })
+        })
+        .collect::<Vec<_>>()
+}
+
+fn create_pixels_buffers(device: &wgpu::Device, size: ScreenSize) -> DoubleBuffered<Pixel> {
+    let pixels = create_pixels(size);
 
     DoubleBuffered {
-        input: buffer::Builder::from_contents(&initial_starting_values)
-            .with_label("starting-values-buffer-1")
+        input: buffer::Builder::from_contents(&pixels)
+            .with_label("pixels_buffer_1")
             .with_usage(wgpu::BufferUsages::STORAGE)
+            .with_usage(wgpu::BufferUsages::COPY_SRC)
             .create(device),
 
-        output: buffer::Builder::from_contents(&initial_starting_values)
-            .with_label("starting-values-buffer-2")
+        output: buffer::Builder::from_contents(&pixels)
+            .with_label("pixels_buffer_2")
             .with_usage(wgpu::BufferUsages::STORAGE)
+            .with_usage(wgpu::BufferUsages::COPY_SRC)
             .create(device),
     }
 }
@@ -129,34 +109,27 @@ struct Vec2 {
 }
 
 fn compute_colour_ranges(
-    iteration_counts: buffer::View<IterationCount>,
-    samples: &mut Vec<u32>,
-    colour_ranges_out: &mut Vec<ColourRange>,
+    screen_size: ScreenSize,
+    newly_escaped_pixels: Vec<Pixel>,
+    total_samples: &mut usize,
+    colour_ranges: &mut [ColourRange],
     bucket_labels: &mut Vec<u32>,
-    histogram: &mut FnvHashMap<u32, f32>,
+    histogram: &mut FnvHashMap<u32, u32>,
 ) {
     trace!("begin compute_colour_ranges");
+    debug_assert!(colour_ranges.len() == (screen_size.width * screen_size.height) as usize);
 
-    let iteration_counts = &*iteration_counts;
-    samples.clear();
-    colour_ranges_out.clear();
-    bucket_labels.clear();
-    histogram.clear();
+    let newly_escaped_pixels = &*newly_escaped_pixels;
 
-    for iteration_count in iteration_counts {
-        if iteration_count.escaped == 1 {
-            samples.push(iteration_count.value);
+    for pixel in newly_escaped_pixels {
+        if pixel.escaped == 1 {
+            let value = histogram.entry(pixel.iteration_count).or_insert_with(|| {
+                bucket_labels.push(pixel.iteration_count);
+                0
+            });
+            *value += 1;
+            *total_samples += 1;
         }
-    }
-
-    let total_samples = samples.len() as f32;
-
-    for current_sample in samples {
-        let value = histogram.entry(*current_sample).or_insert_with(|| {
-            bucket_labels.push(*current_sample);
-            0.0
-        });
-        *value += 1.0;
     }
 
     debug_assert!(
@@ -171,32 +144,40 @@ fn compute_colour_ranges(
     );
     bucket_labels.sort();
 
+    let mut histogram_ranges: FnvHashMap<u32, f32> =
+        FnvHashMap::with_capacity_and_hasher(histogram.len(), Default::default());
+
     let mut bucket_level = 0.0;
     for bucket_label in bucket_labels {
-        let bucket_value = histogram.get_mut(bucket_label).unwrap();
+        let bucket_value = histogram.get(bucket_label).unwrap();
 
         let old_bucket_level = bucket_level;
-        bucket_level = old_bucket_level + *bucket_value / total_samples;
+        bucket_level = old_bucket_level + *bucket_value as f32 / *total_samples as f32;
 
-        *bucket_value = old_bucket_level;
+        histogram_ranges.insert(*bucket_label, old_bucket_level);
     }
 
-    colour_ranges_out
-        .extend(std::iter::repeat(ColourRange::default()).take(iteration_counts.len()));
-    colour_ranges_out
-        .par_iter_mut()
-        .enumerate()
-        .for_each(|(index, colour_range)| {
-            let iteration_count = iteration_counts[index];
-            *colour_range = ColourRange {
-                escaped: iteration_count.escaped,
-                value: if iteration_count.escaped == 1 {
-                    histogram.get(&iteration_count.value).copied().unwrap()
-                } else {
-                    0.0
-                },
+    for pixel in newly_escaped_pixels {
+        debug_assert!(pixel.escaped == 1);
+        debug_assert!(pixel.x < screen_size.width);
+        debug_assert!(
+            pixel.y < screen_size.height,
+            "pixel.y ({}) not < {}",
+            pixel.y,
+            screen_size.height
+        );
+
+        colour_ranges[pixel.y as usize * screen_size.width as usize + pixel.x as usize] =
+            ColourRange {
+                escaped: 1,
+                value: histogram_ranges
+                    .get(&pixel.iteration_count)
+                    .copied()
+                    .unwrap_or_else(|| {
+                        panic!("{} was not in histogram_ranges", pixel.iteration_count)
+                    }),
             };
-        });
+    }
 
     trace!("end compute_colour_ranges");
 }
@@ -293,7 +274,7 @@ fn main() {
         device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("compute-bind-group-layout-2"),
             entries: &[
-                // compute.wgsl#starting_values_in
+                // compute.wgsl#input
                 wgpu::BindGroupLayoutEntry {
                     binding: 0,
                     visibility: wgpu::ShaderStages::COMPUTE,
@@ -304,31 +285,9 @@ fn main() {
                     },
                     count: None,
                 },
-                // compute.wgsl#starting_values_out
+                // compute.wgsl#output
                 wgpu::BindGroupLayoutEntry {
                     binding: 1,
-                    visibility: wgpu::ShaderStages::COMPUTE,
-                    ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Storage { read_only: false },
-                        has_dynamic_offset: false,
-                        min_binding_size: None,
-                    },
-                    count: None,
-                },
-                // compute.wgsl#iteration_counts_in
-                wgpu::BindGroupLayoutEntry {
-                    binding: 2,
-                    visibility: wgpu::ShaderStages::COMPUTE,
-                    ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Storage { read_only: true },
-                        has_dynamic_offset: false,
-                        min_binding_size: None,
-                    },
-                    count: None,
-                },
-                // compute.wgsl#iteration_counts_out
-                wgpu::BindGroupLayoutEntry {
-                    binding: 3,
                     visibility: wgpu::ShaderStages::COMPUTE,
                     ty: wgpu::BindingType::Buffer {
                         ty: wgpu::BufferBindingType::Storage { read_only: false },
@@ -455,14 +414,13 @@ fn main() {
         .with_usage(wgpu::BufferUsages::UNIFORM)
         .create(&device);
 
-    let mut iteration_counts_buffers = create_iteration_counts_buffers(&device, screen_size);
-    let mut iteration_counts_staging_buffer =
+    let mut pixels_staging_buffer =
         buffer::Builder::new((screen_size.width * screen_size.height) as u64)
-            .with_label("iteration_counts_staging_buffer")
+            .with_label("pixels_staging_buffer")
             .with_usage(wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ)
             .create(&device);
 
-    let mut starting_values_buffers = create_starting_values_buffers(&device, screen_size);
+    let mut pixels_buffers = create_pixels_buffers(&device, screen_size);
 
     let mut compute_bind_group_1 = device.create_bind_group(&wgpu::BindGroupDescriptor {
         label: Some("compute-bind-group-1"),
@@ -510,10 +468,14 @@ fn main() {
     .with_usage(wgpu::BufferUsages::STORAGE)
     .create(&device);
 
-    let mut samples = Vec::new();
-    let mut colour_ranges = Vec::new();
+    let mut total_samples = 0;
+    let mut colour_ranges: Vec<ColourRange> = std::iter::repeat(ColourRange::default())
+        .take((screen_size.width * screen_size.height) as usize)
+        .collect();
     let mut bucket_labels = Vec::new();
     let mut histogram = FnvHashMap::default();
+
+    let mut unescaped_pixels: Vec<Pixel> = create_pixels(screen_size);
 
     event_loop.run(move |event, _, control_flow| {
         // To present frames in realtime, *don't* set `control_flow` to `Wait`.
@@ -573,32 +535,36 @@ fn main() {
                 WindowEvent::Resized(new_size) => {
                     debug!("resizing to {:?}", new_size);
                     size = new_size;
+                    screen_size = ScreenSize {
+                        width: size.width as u32,
+                        height: size.height as u32,
+                    };
 
                     surface_configuration.width = size.width;
                     surface_configuration.height = size.height;
 
                     surface.configure(&device, &surface_configuration);
 
-                    screen_size = ScreenSize {
-                        width: size.width as u32,
-                        height: size.height as u32,
-                    };
+                    total_samples = 0;
+                    colour_ranges.clear();
+                    colour_ranges.extend(
+                        std::iter::repeat(ColourRange::default())
+                            .take((screen_size.width * screen_size.height) as usize),
+                    );
+                    bucket_labels.clear();
+                    histogram.clear();
+
                     screen_size_buffer.write(&queue, screen_size);
 
-                    std::mem::replace(
-                        &mut iteration_counts_buffers,
-                        create_iteration_counts_buffers(&device, screen_size),
-                    )
-                    .destroy();
-                    iteration_counts_staging_buffer =
+                    pixels_staging_buffer =
                         buffer::Builder::new((screen_size.width * screen_size.height) as u64)
-                            .with_label("iteration_counts_staging_buffer")
+                            .with_label("pixels_staging_buffer")
                             .with_usage(wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ)
                             .create(&device);
 
                     std::mem::replace(
-                        &mut starting_values_buffers,
-                        create_starting_values_buffers(&device, screen_size),
+                        &mut pixels_buffers,
+                        create_pixels_buffers(&device, screen_size),
                     )
                     .destroy();
 
@@ -658,28 +624,18 @@ fn main() {
                 origin_changed = false;
 
                 if reset_buffers {
-                    let initial_starting_values = std::iter::repeat(Complex::ZERO)
-                        .take((size.width * size.height) as usize)
-                        .collect::<Vec<_>>();
-                    starting_values_buffers
-                        .input
-                        .write(&queue, &initial_starting_values);
-                    starting_values_buffers
-                        .output
-                        .write(&queue, &initial_starting_values);
-
-                    let initial_iteration_counts = std::iter::repeat(IterationCount {
-                        escaped: 0,
-                        value: 0,
-                    })
-                    .take((size.width * size.height) as usize)
-                    .collect::<Vec<_>>();
-                    iteration_counts_buffers
-                        .input
-                        .write(&queue, &initial_iteration_counts);
-                    iteration_counts_buffers
-                        .output
-                        .write(&queue, &initial_iteration_counts);
+                    total_samples = 0;
+                    colour_ranges.clear();
+                    colour_ranges.extend(
+                        std::iter::repeat(ColourRange::default())
+                            .take((screen_size.width * screen_size.height) as usize),
+                    );
+                    bucket_labels.clear();
+                    histogram.clear();
+                    let pixels = create_pixels(screen_size);
+                    pixels_buffers.input.write(&queue, &pixels);
+                    pixels_buffers.output.write(&queue, &pixels);
+                    unescaped_pixels = pixels;
                 }
 
                 let surface_texture = surface.get_current_texture().unwrap();
@@ -691,25 +647,15 @@ fn main() {
                     label: Some("compute-bind-group-2"),
                     layout: &compute_bind_group_layout_2,
                     entries: &[
-                        // compute.wgsl#starting_values_in
+                        // compute.wgsl#input
                         wgpu::BindGroupEntry {
                             binding: 0,
-                            resource: starting_values_buffers.input.binding_resource(0, None),
+                            resource: pixels_buffers.input.binding_resource(0, None),
                         },
-                        // compute.wgsl#starting_values_out
+                        // compute.wgsl#output
                         wgpu::BindGroupEntry {
                             binding: 1,
-                            resource: starting_values_buffers.output.binding_resource(0, None),
-                        },
-                        // compute.wgsl#iteration_counts_in
-                        wgpu::BindGroupEntry {
-                            binding: 2,
-                            resource: iteration_counts_buffers.input.binding_resource(0, None),
-                        },
-                        // compute.wgsl#iteration_counts_out
-                        wgpu::BindGroupEntry {
-                            binding: 3,
-                            resource: iteration_counts_buffers.output.binding_resource(0, None),
+                            resource: pixels_buffers.output.binding_resource(0, None),
                         },
                     ],
                 });
@@ -730,6 +676,8 @@ fn main() {
                     &device,
                     &wgpu::CommandEncoderDescriptor::default(),
                     |command_encoder| {
+                        pixels_buffers.input.write(&queue, &unescaped_pixels);
+
                         command_encoder.push_debug_group("compute-pass");
                         command_encoder.with_compute_pass(
                             &wgpu::ComputePassDescriptor {
@@ -742,19 +690,23 @@ fn main() {
                                 compute_pass.set_bind_group(1, &compute_bind_group_2, &[]);
 
                                 compute_pass.insert_debug_marker("mandelbrot");
-                                compute_pass.dispatch_workgroups(size.width, size.height, 1);
+
+                                let total_work = unescaped_pixels.len();
+                                let x = total_work / 65536;
+                                let y = total_work % 65536;
+                                debug_assert!(x <= 65535);
+                                debug_assert!(y <= 65535);
+                                compute_pass.dispatch_workgroups(x as u32, y as u32, 1);
                             },
                         );
                         command_encoder.pop_debug_group();
 
                         command_encoder.copy_buffer_to_buffer(
-                            iteration_counts_buffers.output.buffer(),
+                            pixels_buffers.output.buffer(),
                             0,
-                            iteration_counts_staging_buffer.buffer(),
+                            pixels_staging_buffer.buffer(),
                             0,
-                            (std::mem::size_of::<IterationCount>()
-                                * screen_size.width as usize
-                                * screen_size.height as usize)
+                            (std::mem::size_of::<Pixel>() * unescaped_pixels.len())
                                 .try_into()
                                 .unwrap(),
                         );
@@ -763,14 +715,13 @@ fn main() {
 
                 queue.submit([compute_command_buffer]);
 
-                let iteration_counts_staging_buffer_slice =
-                    iteration_counts_staging_buffer.slice(..);
+                let pixels_staging_buffer_slice = pixels_staging_buffer.slice(..);
 
                 {
                     trace!("waiting for staging buffer");
                     let mapped = Arc::new((Mutex::new(true), Condvar::new()));
 
-                    iteration_counts_staging_buffer_slice.map_async(wgpu::MapMode::Read, {
+                    pixels_staging_buffer_slice.map_async(wgpu::MapMode::Read, {
                         let mapped = mapped.clone();
                         move |map_result| {
                             debug!("map_async callback called");
@@ -796,23 +747,42 @@ fn main() {
                     trace!("staging buffer mapped");
                 }
 
-                let iteration_counts_staging_buffer_view =
-                    iteration_counts_staging_buffer_slice.get_mapped_range();
+                let newly_escaped_pixels: Vec<Pixel> = {
+                    let pixels_staging_buffer_view: buffer::View<Pixel> =
+                        pixels_staging_buffer_slice.get_mapped_range();
+
+                    unescaped_pixels.clear();
+
+                    let mut newly_escaped_pixels: Vec<Pixel> = Vec::new();
+                    unescaped_pixels.extend(pixels_staging_buffer_view.iter().filter(|pixel| {
+                        if pixel.escaped == 1 {
+                            newly_escaped_pixels.push(**pixel);
+                            false
+                        } else {
+                            true
+                        }
+                    }));
+                    newly_escaped_pixels
+                };
+
+                pixels_staging_buffer.buffer().unmap();
 
                 let now = Instant::now();
                 compute_colour_ranges(
-                    iteration_counts_staging_buffer_view,
-                    &mut samples,
+                    screen_size,
+                    newly_escaped_pixels,
+                    &mut total_samples,
                     &mut colour_ranges,
                     &mut bucket_labels,
                     &mut histogram,
                 );
                 debug_assert!(
-                    colour_ranges.len() == screen_size.width as usize * screen_size.height as usize
+                    colour_ranges.len() == screen_size.width as usize * screen_size.height as usize,
+                    "colour_ranges.len() == {}, expected {}",
+                    colour_ranges.len(),
+                    screen_size.width * screen_size.height,
                 );
                 debug!("took {:?}ms", now.elapsed().as_millis());
-
-                iteration_counts_staging_buffer.buffer().unmap();
 
                 colour_ranges_buffer.write(&queue, &colour_ranges);
 
@@ -855,8 +825,7 @@ fn main() {
 
                 surface_texture.present();
 
-                starting_values_buffers.swap();
-                iteration_counts_buffers.swap();
+                pixels_buffers.swap();
             }
             _ => {}
         }
