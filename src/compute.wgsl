@@ -27,9 +27,10 @@ let ESCAPE_THRESHOLD: f32 = 2.0;
 struct Pixel{
   x : u32,
   y : u32,
-  current_value : Complex,
   escaped : u32,
-  iteration_count : u32
+  current_value : Complex,
+  iteration_count : u32,
+  debug_index : u32,
 }
 
 /*
@@ -63,18 +64,22 @@ on the screen, and sample the results texture for its color.
 @group(1) @binding(0) var<storage, read> input : array<Pixel>;
 @group(1) @binding(1) var<storage, read_write> output : array<Pixel>;
 
-@compute @workgroup_size(64)
+@compute @workgroup_size(1)
 fn mandelbrot(@builtin(global_invocation_id) global_invocation_id: vec3<u32>) {
-  let index = global_invocation_id.x * 65536u + global_invocation_id.y;
+  let index = global_invocation_id.x * 65535u + global_invocation_id.y;
+  output[index].debug_index = index;
   
   let pixel = input[index];
   
   let x = pixel.x;
+  output[index].x = x;
+
   let y = pixel.y;
+  output[index].y = y;
   
   let zoom_inv = 2.0 / zoom;
 
-  var c = Complex(
+  let c = Complex(
     2.0 * zoom_inv * f32(x) / f32(screen_size.x) - zoom_inv + origin.x,
     2.0 * zoom_inv * f32(y) / f32(screen_size.y) - zoom_inv + origin.y
   );
@@ -88,6 +93,7 @@ fn mandelbrot(@builtin(global_invocation_id) global_invocation_id: vec3<u32>) {
   // length_complex(starting_value) < ESCAPE_THRESHOLD implies xx > 0
   // 
   // length_complex(starting_value) >= ESCAPE_THRESHOLD implies xx <= 0
+
   let escape_threshold_minus_length = ESCAPE_THRESHOLD - length_complex(starting_value);
 
   // length_complex(starting_value) >= ESCAPE_THRESHOLD implies max(xx, 0.0) == 0
@@ -113,7 +119,7 @@ fn mandelbrot(@builtin(global_invocation_id) global_invocation_id: vec3<u32>) {
   //   escaped == u32(0.0)
   //   escaped == 0u
   output[index].escaped =
-    u32(1.0 - sign(escape_threshold_minus_length_max_0));
+    1u - u32(sign(escape_threshold_minus_length_max_0));
 
   let escaped_last_iteration : u32 = pixel.escaped;
   output[index].iteration_count =
@@ -121,11 +127,11 @@ fn mandelbrot(@builtin(global_invocation_id) global_invocation_id: vec3<u32>) {
     // Add nothing when the point has already escaped,
     // add 1 when the point hasn't escaped.
     //
-    // iteration_counts_in[index].escaped == 0u implies
-    //   1u - iteration_counts_in[index].escaped == 1u
+    // escaped_last_iteration == 0u implies
+    //   1u - escaped_last_iteration == 1u
     //
     // iteration_counts_in[index].escaped == 1u implies
-    //   1u - iteration_counts_in[index].escaped == 0u
+    //   1u - escaped_last_iteration == 0u
     (1u - escaped_last_iteration);
 
   let escaped_last_iteration : f32 = f32(escaped_last_iteration);

@@ -5,8 +5,9 @@ mod double_buffered;
 mod var;
 
 use std::{
+    io::Write,
     sync::{Arc, Condvar, Mutex},
-    time::Instant,
+    time::{Duration, Instant},
 };
 
 use bytemuck::{Pod, Zeroable};
@@ -46,7 +47,7 @@ struct ScreenSize {
 }
 
 #[repr(C)]
-#[derive(Pod, Zeroable, Clone, Copy)]
+#[derive(Pod, Zeroable, Clone, Copy, Debug)]
 struct Complex {
     real: f32,
     imaginary: f32,
@@ -59,14 +60,19 @@ impl Complex {
     };
 }
 
+// alignment: 4
+// unpadded size: 4 + 4 + 8 + 4 + 4 = 24
+// size is a multiple of alignment
+// requires 0 bytes padding
 #[repr(C)]
-#[derive(Pod, Zeroable, Clone, Copy)]
+#[derive(Pod, Zeroable, Clone, Copy, Debug)]
 struct Pixel {
     x: u32,
     y: u32,
-    current_value: Complex,
     escaped: u32,
+    current_value: Complex,
     iteration_count: u32,
+    debug_index: u32,
 }
 
 fn create_pixels(size: ScreenSize) -> Vec<Pixel> {
@@ -78,6 +84,7 @@ fn create_pixels(size: ScreenSize) -> Vec<Pixel> {
                 current_value: Complex::ZERO,
                 escaped: 0,
                 iteration_count: 0,
+                debug_index: 666,
             })
         })
         .collect::<Vec<_>>()
@@ -110,6 +117,7 @@ struct Vec2 {
 
 fn compute_colour_ranges(
     screen_size: ScreenSize,
+    pixels: &[Pixel],
     newly_escaped_pixels: Vec<Pixel>,
     total_samples: &mut usize,
     colour_ranges: &mut [ColourRange],
@@ -122,14 +130,16 @@ fn compute_colour_ranges(
     let newly_escaped_pixels = &*newly_escaped_pixels;
 
     for pixel in newly_escaped_pixels {
-        if pixel.escaped == 1 {
-            let value = histogram.entry(pixel.iteration_count).or_insert_with(|| {
-                bucket_labels.push(pixel.iteration_count);
-                0
-            });
-            *value += 1;
-            *total_samples += 1;
-        }
+        debug_assert!(pixel.escaped == 1);
+
+        colour_ranges[pixel.y as usize * screen_size.width as usize + pixel.x as usize].escaped = 1;
+
+        let value = histogram.entry(pixel.iteration_count).or_insert_with(|| {
+            bucket_labels.push(pixel.iteration_count);
+            0
+        });
+        *value += 1;
+        *total_samples += 1;
     }
 
     debug_assert!(
@@ -157,26 +167,13 @@ fn compute_colour_ranges(
         histogram_ranges.insert(*bucket_label, old_bucket_level);
     }
 
-    for pixel in newly_escaped_pixels {
-        debug_assert!(pixel.escaped == 1);
-        debug_assert!(pixel.x < screen_size.width);
-        debug_assert!(
-            pixel.y < screen_size.height,
-            "pixel.y ({}) not < {}",
-            pixel.y,
-            screen_size.height
-        );
-
-        colour_ranges[pixel.y as usize * screen_size.width as usize + pixel.x as usize] =
-            ColourRange {
-                escaped: 1,
-                value: histogram_ranges
-                    .get(&pixel.iteration_count)
-                    .copied()
-                    .unwrap_or_else(|| {
-                        panic!("{} was not in histogram_ranges", pixel.iteration_count)
-                    }),
-            };
+    for (colour_range, pixel) in colour_ranges.iter_mut().zip(pixels.iter()) {
+        if pixel.escaped == 1 {
+            colour_range.value = histogram_ranges
+                .get(&pixel.iteration_count)
+                .copied()
+                .unwrap_or_else(|| panic!("{} was not in histogram_ranges", pixel.iteration_count))
+        }
     }
 
     trace!("end compute_colour_ranges");
@@ -414,8 +411,8 @@ fn main() {
         .with_usage(wgpu::BufferUsages::UNIFORM)
         .create(&device);
 
-    let mut pixels_staging_buffer =
-        buffer::Builder::new((screen_size.width * screen_size.height) as u64)
+    let mut pixels_staging_buffer: buffer::Buffer<Pixel> =
+        buffer::Builder::new(screen_size.width as u64 * screen_size.height as u64)
             .with_label("pixels_staging_buffer")
             .with_usage(wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ)
             .create(&device);
@@ -472,10 +469,13 @@ fn main() {
     let mut colour_ranges: Vec<ColourRange> = std::iter::repeat(ColourRange::default())
         .take((screen_size.width * screen_size.height) as usize)
         .collect();
-    let mut bucket_labels = Vec::new();
-    let mut histogram = FnvHashMap::default();
+    let mut bucket_labels: Vec<u32> = Vec::new();
+    let mut histogram: FnvHashMap<u32, u32> = FnvHashMap::default();
 
+    let mut all_pixels: Vec<Pixel> = create_pixels(screen_size);
     let mut unescaped_pixels: Vec<Pixel> = create_pixels(screen_size);
+
+    let device = Arc::new(device);
 
     event_loop.run(move |event, _, control_flow| {
         // To present frames in realtime, *don't* set `control_flow` to `Wait`.
@@ -557,7 +557,7 @@ fn main() {
                     screen_size_buffer.write(&queue, screen_size);
 
                     pixels_staging_buffer =
-                        buffer::Builder::new((screen_size.width * screen_size.height) as u64)
+                        buffer::Builder::new(screen_size.width as u64 * screen_size.height as u64)
                             .with_label("pixels_staging_buffer")
                             .with_usage(wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ)
                             .create(&device);
@@ -567,6 +567,8 @@ fn main() {
                         create_pixels_buffers(&device, screen_size),
                     )
                     .destroy();
+                    all_pixels = create_pixels(screen_size);
+                    unescaped_pixels = create_pixels(screen_size);
 
                     std::mem::replace(
                         &mut colour_ranges_buffer,
@@ -619,6 +621,16 @@ fn main() {
                 _ => {}
             },
             Event::RedrawRequested(window_id) if window_id == window.id() => {
+                debug_assert!(
+                    unescaped_pixels.len()
+                        <= screen_size.width as usize * screen_size.height as usize
+                );
+                if cfg!(debug_assertions) {
+                    for pixel in unescaped_pixels.iter() {
+                        debug_assert!(pixel.escaped < 2);
+                    }
+                }
+
                 let reset_buffers = zoom_changed || origin_changed;
                 zoom_changed = false;
                 origin_changed = false;
@@ -635,6 +647,7 @@ fn main() {
                     let pixels = create_pixels(screen_size);
                     pixels_buffers.input.write(&queue, &pixels);
                     pixels_buffers.output.write(&queue, &pixels);
+                    all_pixels = pixels.clone();
                     unescaped_pixels = pixels;
                 }
 
@@ -692,11 +705,21 @@ fn main() {
                                 compute_pass.insert_debug_marker("mandelbrot");
 
                                 let total_work = unescaped_pixels.len();
-                                let x = total_work / 65536;
-                                let y = total_work % 65536;
-                                debug_assert!(x <= 65535);
-                                debug_assert!(y <= 65535);
-                                compute_pass.dispatch_workgroups(x as u32, y as u32, 1);
+                                if total_work <= 65535 {
+                                    compute_pass.dispatch_workgroups(1, total_work as u32, 1);
+                                } else {
+                                    let x = total_work / 65535 + 1;
+                                    let y = 65535;
+                                    debug_assert!(
+                                        x * y > total_work,
+                                        "x ({}) * y ({}) is {} which is not > {}",
+                                        x,
+                                        y,
+                                        x * y,
+                                        total_work
+                                    );
+                                    compute_pass.dispatch_workgroups(x as u32, y as u32, 1);
+                                }
                             },
                         );
                         command_encoder.pop_debug_group();
@@ -733,18 +756,16 @@ fn main() {
                     });
 
                     {
-                        let device = Arc::from(&device);
-                        std::thread::scope(|scope| {
-                            scope.spawn(|| while !device.poll(wgpu::Maintain::Poll) {});
-                        });
+                        let device = device.clone();
+                        std::thread::spawn(move || while !device.poll(wgpu::Maintain::Poll) {});
                     }
 
-                    trace!("waiting for condition");
+                    debug!("waiting for condition");
                     let _guard = mapped
                         .1
                         .wait_while(mapped.0.lock().unwrap(), |pending| *pending)
                         .unwrap();
-                    trace!("staging buffer mapped");
+                    debug!("staging buffer mapped");
                 }
 
                 let newly_escaped_pixels: Vec<Pixel> = {
@@ -754,14 +775,24 @@ fn main() {
                     unescaped_pixels.clear();
 
                     let mut newly_escaped_pixels: Vec<Pixel> = Vec::new();
+
                     unescaped_pixels.extend(pixels_staging_buffer_view.iter().filter(|pixel| {
+                        let pixel = **pixel;
+
+                        debug_assert!(pixel.x < screen_size.width);
+                        debug_assert!(pixel.y < screen_size.height);
+                        debug_assert!(pixel.escaped < 2);
+
                         if pixel.escaped == 1 {
-                            newly_escaped_pixels.push(**pixel);
+                            all_pixels[pixel.y as usize * screen_size.width as usize
+                                + pixel.x as usize] = pixel;
+                            newly_escaped_pixels.push(pixel);
                             false
                         } else {
                             true
                         }
                     }));
+
                     newly_escaped_pixels
                 };
 
@@ -770,6 +801,7 @@ fn main() {
                 let now = Instant::now();
                 compute_colour_ranges(
                     screen_size,
+                    &all_pixels,
                     newly_escaped_pixels,
                     &mut total_samples,
                     &mut colour_ranges,
