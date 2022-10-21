@@ -30,7 +30,6 @@ struct Pixel{
   escaped : u32,
   current_value : Complex,
   iteration_count : u32,
-  debug_index : u32,
 }
 
 /*
@@ -67,7 +66,6 @@ on the screen, and sample the results texture for its color.
 @compute @workgroup_size(1)
 fn mandelbrot(@builtin(global_invocation_id) global_invocation_id: vec3<u32>) {
   let index = global_invocation_id.x * 65535u + global_invocation_id.y;
-  output[index].debug_index = index;
   
   let pixel = input[index];
   

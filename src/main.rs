@@ -4,10 +4,7 @@ mod command_encoder;
 mod double_buffered;
 mod var;
 
-use std::{
-    sync::{Arc, Condvar, Mutex},
-    time::{Duration, Instant},
-};
+use std::sync::{Arc, Condvar, Mutex};
 
 use bytemuck::{Pod, Zeroable};
 use fnv::{FnvHashMap, FnvHashSet};
@@ -71,7 +68,6 @@ struct Pixel {
     escaped: u32,
     current_value: Complex,
     iteration_count: u32,
-    debug_index: u32,
 }
 
 fn create_pixels(size: ScreenSize) -> Vec<Pixel> {
@@ -83,7 +79,6 @@ fn create_pixels(size: ScreenSize) -> Vec<Pixel> {
                 current_value: Complex::ZERO,
                 escaped: 0,
                 iteration_count: 0,
-                debug_index: 666,
             })
         })
         .collect::<Vec<_>>()
