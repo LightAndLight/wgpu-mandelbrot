@@ -702,18 +702,30 @@ fn main() {
                                 compute_pass.insert_debug_marker("mandelbrot");
 
                                 let total_work = unescaped_pixels.len();
-                                if total_work <= 65535 {
-                                    compute_pass.dispatch_workgroups(1, total_work as u32, 1);
+                                let y_workgroup_size = 64;
+                                if total_work / y_workgroup_size < 65535 {
+                                    compute_pass.dispatch_workgroups(
+                                        1,
+                                        (total_work / y_workgroup_size + 1) as u32,
+                                        1,
+                                    );
                                 } else {
                                     let x = total_work / 65535 + 1;
-                                    let y = 65535;
+                                    let y = 65535 / y_workgroup_size;
                                     debug_assert!(
-                                        x * y > total_work,
-                                        "x ({}) * y ({}) is {} which is not > {}",
+                                        x * y * y_workgroup_size > total_work,
+                                        "x ({}) * y * {} ({}) is {} which is not > {}",
                                         x,
+                                        y_workgroup_size,
                                         y,
-                                        x * y,
+                                        x * y * 64,
                                         total_work
+                                    );
+                                    debug_assert!(
+                                        total_work < x * y * y_workgroup_size + y * y_workgroup_size,
+                                        "total work ({}) is not < x * y * {y_workgroup_size} + y * {y_workgroup_size} ({})",
+                                        total_work,
+                                        x * y * y_workgroup_size + y * y_workgroup_size
                                     );
                                     compute_pass.dispatch_workgroups(x as u32, y as u32, 1);
                                 }
