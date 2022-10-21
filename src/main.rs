@@ -120,52 +120,56 @@ fn compute_colour_ranges(
     histogram_ranges: &mut FnvHashMap<u32, f32>,
 ) {
     trace!("begin compute_colour_ranges");
-    debug_assert!(colour_ranges.len() == (screen_size.width * screen_size.height) as usize);
 
-    for pixel in newly_escaped_pixels {
-        debug_assert!(pixel.escaped == 1);
+    if !newly_escaped_pixels.is_empty() {
+        debug_assert!(colour_ranges.len() == (screen_size.width * screen_size.height) as usize);
 
-        colour_ranges[pixel.y as usize * screen_size.width as usize + pixel.x as usize].escaped = 1;
+        for pixel in newly_escaped_pixels {
+            debug_assert!(pixel.escaped == 1);
 
-        let value = histogram.entry(pixel.iteration_count).or_insert_with(|| {
-            bucket_labels.push(pixel.iteration_count);
-            0
-        });
-        *value += 1;
-        *total_samples += 1;
-    }
+            colour_ranges[pixel.y as usize * screen_size.width as usize + pixel.x as usize]
+                .escaped = 1;
 
-    debug_assert!(
-        bucket_labels.len()
-            == bucket_labels
-                .iter()
-                .copied()
-                .collect::<FnvHashSet<u32>>()
-                .len(),
-        "bucket_labels contains duplicates: {:?}",
-        bucket_labels
-    );
-    bucket_labels.sort();
+            let value = histogram.entry(pixel.iteration_count).or_insert_with(|| {
+                bucket_labels.push(pixel.iteration_count);
+                0
+            });
+            *value += 1;
+            *total_samples += 1;
+        }
 
-    let mut bucket_level = 0.0;
-    for bucket_label in bucket_labels {
-        let bucket_value = histogram.get(bucket_label).unwrap();
+        debug_assert!(
+            bucket_labels.len()
+                == bucket_labels
+                    .iter()
+                    .copied()
+                    .collect::<FnvHashSet<u32>>()
+                    .len(),
+            "bucket_labels contains duplicates: {:?}",
+            bucket_labels
+        );
+        bucket_labels.sort();
 
-        let old_bucket_level = bucket_level;
-        bucket_level = old_bucket_level + *bucket_value as f32 / *total_samples as f32;
+        let mut bucket_level = 0.0;
+        for bucket_label in bucket_labels {
+            let bucket_value = histogram.get(bucket_label).unwrap();
 
-        histogram_ranges.insert(*bucket_label, old_bucket_level);
-    }
+            let old_bucket_level = bucket_level;
+            bucket_level = old_bucket_level + *bucket_value as f32 / *total_samples as f32;
 
-    for pixel in pixels.iter() {
-        if pixel.escaped == 1 {
-            colour_ranges[pixel.y as usize * screen_size.width as usize + pixel.x as usize].value =
-                histogram_ranges
+            histogram_ranges.insert(*bucket_label, old_bucket_level);
+        }
+
+        for pixel in pixels.iter() {
+            if pixel.escaped == 1 {
+                colour_ranges[pixel.y as usize * screen_size.width as usize + pixel.x as usize]
+                    .value = histogram_ranges
                     .get(&pixel.iteration_count)
                     .copied()
                     .unwrap_or_else(|| {
                         panic!("{} was not in histogram_ranges", pixel.iteration_count)
                     })
+            }
         }
     }
 
