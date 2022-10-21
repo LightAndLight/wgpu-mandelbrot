@@ -5,7 +5,6 @@ mod double_buffered;
 mod var;
 
 use std::{
-    io::Write,
     sync::{Arc, Condvar, Mutex},
     time::{Duration, Instant},
 };
@@ -123,6 +122,7 @@ fn compute_colour_ranges(
     colour_ranges: &mut [ColourRange],
     bucket_labels: &mut Vec<u32>,
     histogram: &mut FnvHashMap<u32, u32>,
+    histogram_ranges: &mut FnvHashMap<u32, f32>,
 ) {
     trace!("begin compute_colour_ranges");
     debug_assert!(colour_ranges.len() == (screen_size.width * screen_size.height) as usize);
@@ -151,9 +151,6 @@ fn compute_colour_ranges(
         bucket_labels
     );
     bucket_labels.sort();
-
-    let mut histogram_ranges: FnvHashMap<u32, f32> =
-        FnvHashMap::with_capacity_and_hasher(histogram.len(), Default::default());
 
     let mut bucket_level = 0.0;
     for bucket_label in bucket_labels {
@@ -472,6 +469,7 @@ fn main() {
         .collect();
     let mut bucket_labels: Vec<u32> = Vec::new();
     let mut histogram: FnvHashMap<u32, u32> = FnvHashMap::default();
+    let mut histogram_ranges: FnvHashMap<u32, f32> = FnvHashMap::default();
 
     let mut all_pixels: Vec<Pixel> = create_pixels(screen_size);
     let mut unescaped_pixels: Vec<Pixel> = create_pixels(screen_size);
@@ -555,6 +553,7 @@ fn main() {
                     );
                     bucket_labels.clear();
                     histogram.clear();
+                    histogram_ranges.clear();
 
                     screen_size_buffer.write(&queue, screen_size);
 
@@ -646,6 +645,7 @@ fn main() {
                     );
                     bucket_labels.clear();
                     histogram.clear();
+                    histogram_ranges.clear();
                     let pixels = create_pixels(screen_size);
                     pixels_buffers.input.write(&queue, &pixels);
                     pixels_buffers.output.write(&queue, &pixels);
@@ -796,7 +796,6 @@ fn main() {
 
                 pixels_staging_buffer.buffer().unmap();
 
-                let now = Instant::now();
                 compute_colour_ranges(
                     screen_size,
                     &all_pixels,
@@ -805,6 +804,7 @@ fn main() {
                     &mut colour_ranges,
                     &mut bucket_labels,
                     &mut histogram,
+                    &mut histogram_ranges,
                 );
                 debug_assert!(
                     colour_ranges.len() == screen_size.width as usize * screen_size.height as usize,
@@ -812,7 +812,6 @@ fn main() {
                     colour_ranges.len(),
                     screen_size.width * screen_size.height,
                 );
-                debug!("took {:?}ms", now.elapsed().as_millis());
 
                 colour_ranges_buffer.write(&queue, &colour_ranges);
 
