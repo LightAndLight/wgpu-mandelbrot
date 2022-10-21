@@ -118,7 +118,7 @@ struct Vec2 {
 fn compute_colour_ranges(
     screen_size: ScreenSize,
     pixels: &[Pixel],
-    newly_escaped_pixels: Vec<Pixel>,
+    newly_escaped_pixels: &[Pixel],
     total_samples: &mut usize,
     colour_ranges: &mut [ColourRange],
     bucket_labels: &mut Vec<u32>,
@@ -126,8 +126,6 @@ fn compute_colour_ranges(
 ) {
     trace!("begin compute_colour_ranges");
     debug_assert!(colour_ranges.len() == (screen_size.width * screen_size.height) as usize);
-
-    let newly_escaped_pixels = &*newly_escaped_pixels;
 
     for pixel in newly_escaped_pixels {
         debug_assert!(pixel.escaped == 1);
@@ -167,12 +165,15 @@ fn compute_colour_ranges(
         histogram_ranges.insert(*bucket_label, old_bucket_level);
     }
 
-    for (colour_range, pixel) in colour_ranges.iter_mut().zip(pixels.iter()) {
+    for pixel in pixels.iter() {
         if pixel.escaped == 1 {
-            colour_range.value = histogram_ranges
-                .get(&pixel.iteration_count)
-                .copied()
-                .unwrap_or_else(|| panic!("{} was not in histogram_ranges", pixel.iteration_count))
+            colour_ranges[pixel.y as usize * screen_size.width as usize + pixel.x as usize].value =
+                histogram_ranges
+                    .get(&pixel.iteration_count)
+                    .copied()
+                    .unwrap_or_else(|| {
+                        panic!("{} was not in histogram_ranges", pixel.iteration_count)
+                    })
         }
     }
 
@@ -474,6 +475,7 @@ fn main() {
 
     let mut all_pixels: Vec<Pixel> = create_pixels(screen_size);
     let mut unescaped_pixels: Vec<Pixel> = create_pixels(screen_size);
+    let mut newly_escaped_pixels: Vec<Pixel> = Vec::new();
 
     let device = Arc::new(device);
 
@@ -768,16 +770,15 @@ fn main() {
                     debug!("staging buffer mapped");
                 }
 
-                let newly_escaped_pixels: Vec<Pixel> = {
+                {
                     let pixels_staging_buffer_view: buffer::View<Pixel> =
                         pixels_staging_buffer_slice.get_mapped_range();
 
                     unescaped_pixels.clear();
+                    newly_escaped_pixels.clear();
 
-                    let mut newly_escaped_pixels: Vec<Pixel> = Vec::new();
-
-                    unescaped_pixels.extend(pixels_staging_buffer_view.iter().filter(|pixel| {
-                        let pixel = **pixel;
+                    pixels_staging_buffer_view.iter().for_each(|pixel| {
+                        let pixel = *pixel;
 
                         debug_assert!(pixel.x < screen_size.width);
                         debug_assert!(pixel.y < screen_size.height);
@@ -787,14 +788,11 @@ fn main() {
                             all_pixels[pixel.y as usize * screen_size.width as usize
                                 + pixel.x as usize] = pixel;
                             newly_escaped_pixels.push(pixel);
-                            false
                         } else {
-                            true
+                            unescaped_pixels.push(pixel);
                         }
-                    }));
-
-                    newly_escaped_pixels
-                };
+                    });
+                }
 
                 pixels_staging_buffer.buffer().unmap();
 
@@ -802,7 +800,7 @@ fn main() {
                 compute_colour_ranges(
                     screen_size,
                     &all_pixels,
-                    newly_escaped_pixels,
+                    &newly_escaped_pixels,
                     &mut total_samples,
                     &mut colour_ranges,
                     &mut bucket_labels,
