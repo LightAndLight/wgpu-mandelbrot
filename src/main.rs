@@ -9,7 +9,10 @@ use std::sync::{Arc, Condvar, Mutex};
 use bytemuck::{Pod, Zeroable};
 use fnv::{FnvHashMap, FnvHashSet};
 use log::{debug, trace};
-use rayon::ThreadPoolBuilder;
+use rayon::{
+    prelude::{IndexedParallelIterator, IntoParallelRefMutIterator, ParallelIterator},
+    ThreadPoolBuilder,
+};
 use winit::{
     event::{Event, WindowEvent},
     event_loop::{ControlFlow, EventLoop},
@@ -160,16 +163,20 @@ fn compute_colour_ranges(
             histogram_ranges.insert(*bucket_label, old_bucket_level);
         }
 
-        for (index, pixel) in pixels.iter().enumerate() {
-            if pixel.escaped == 1 {
-                colour_ranges[index].value = histogram_ranges
-                    .get(&pixel.iteration_count)
-                    .copied()
-                    .unwrap_or_else(|| {
-                        panic!("{} was not in histogram_ranges", pixel.iteration_count)
-                    })
-            }
-        }
+        colour_ranges
+            .par_iter_mut()
+            .enumerate()
+            .for_each(|(index, colour_range)| {
+                let pixel = pixels[index];
+                if pixel.escaped == 1 {
+                    colour_range.value = histogram_ranges
+                        .get(&pixel.iteration_count)
+                        .copied()
+                        .unwrap_or_else(|| {
+                            panic!("{} was not in histogram_ranges", pixel.iteration_count)
+                        })
+                }
+            });
     }
 
     trace!("end compute_colour_ranges");
