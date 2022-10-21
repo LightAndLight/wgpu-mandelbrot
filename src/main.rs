@@ -160,10 +160,9 @@ fn compute_colour_ranges(
             histogram_ranges.insert(*bucket_label, old_bucket_level);
         }
 
-        for pixel in pixels.iter() {
+        for (index, pixel) in pixels.iter().enumerate() {
             if pixel.escaped == 1 {
-                colour_ranges[pixel.y as usize * screen_size.width as usize + pixel.x as usize]
-                    .value = histogram_ranges
+                colour_ranges[index].value = histogram_ranges
                     .get(&pixel.iteration_count)
                     .copied()
                     .unwrap_or_else(|| {
