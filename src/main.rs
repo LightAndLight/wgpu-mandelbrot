@@ -39,13 +39,13 @@ fn create_pixels_buffers(
     let pixels = create_pixels(size);
 
     typed_buffer::DoubleBuffer {
-        input: typed_buffer::Builder::from_contents(&pixels)
+        input: typed_buffer::Builder::from(pixels.as_slice())
             .with_label("pixels_buffer_1")
             .with_usage(wgpu::BufferUsages::STORAGE)
             .with_usage(wgpu::BufferUsages::COPY_SRC)
             .create(device),
 
-        output: typed_buffer::Builder::from_contents(&pixels)
+        output: typed_buffer::Builder::from(pixels.as_slice())
             .with_label("pixels_buffer_2")
             .with_usage(wgpu::BufferUsages::STORAGE)
             .with_usage(wgpu::BufferUsages::COPY_SRC)
@@ -338,14 +338,14 @@ fn main() {
     let mut zoom_changed = false;
     let mut origin_changed = false;
 
-    let mut colour_ranges_buffer: typed_buffer::Buffer<ColourRange> =
-        typed_buffer::Builder::from_contents(
-            &std::iter::repeat(ColourRange::default())
-                .take((screen_size.width * screen_size.height) as usize)
-                .collect::<Vec<_>>(),
-        )
-        .with_usage(wgpu::BufferUsages::STORAGE)
-        .create(&device);
+    let mut colour_ranges_buffer: typed_buffer::Buffer<ColourRange> = typed_buffer::Builder::from(
+        std::iter::repeat(ColourRange::default())
+            .take((screen_size.width * screen_size.height) as usize)
+            .collect::<Vec<_>>()
+            .as_slice(),
+    )
+    .with_usage(wgpu::BufferUsages::STORAGE)
+    .create(&device);
 
     let mut colour_ranges: Vec<ColourRange> = std::iter::repeat(ColourRange::default())
         .take((screen_size.width * screen_size.height) as usize)
@@ -453,10 +453,11 @@ fn main() {
 
                     std::mem::replace(
                         &mut colour_ranges_buffer,
-                        typed_buffer::Builder::from_contents(
-                            &std::iter::repeat(ColourRange::default())
+                        typed_buffer::Builder::from(
+                            std::iter::repeat(ColourRange::default())
                                 .take((screen_size.width * screen_size.height) as usize)
-                                .collect::<Vec<_>>(),
+                                .collect::<Vec<_>>()
+                                .as_slice(),
                         )
                         .with_usage(wgpu::BufferUsages::STORAGE)
                         .create(&device),

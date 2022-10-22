@@ -127,16 +127,18 @@ pub struct Builder<'a, A> {
     phantom_data: PhantomData<A>,
 }
 
-impl<'a, A: bytemuck::Pod + bytemuck::Zeroable> Builder<'a, A> {
-    pub fn from_contents(contents: &'a [A]) -> Self {
+impl<'a, A: bytemuck::Pod + bytemuck::Zeroable> From<&'a [A]> for Builder<'a, A> {
+    fn from(value: &'a [A]) -> Self {
         Self {
             label: None,
-            contents: Contents::Contents(bytemuck::cast_slice(contents)),
+            contents: Contents::Contents(bytemuck::cast_slice(value)),
             usage: wgpu::BufferUsages::COPY_DST,
             phantom_data: PhantomData,
         }
     }
+}
 
+impl<'a, A: bytemuck::Pod + bytemuck::Zeroable> Builder<'a, A> {
     pub fn new(size: u64) -> Self {
         Self {
             label: None,
