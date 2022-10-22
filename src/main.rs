@@ -108,78 +108,110 @@ struct Vec2 {
     y: f32,
 }
 
-fn compute_colour_ranges(
-    screen_size: ScreenSize,
-    pixels: &[Pixel],
-    newly_escaped_pixels: &[Pixel],
-    total_samples: &mut usize,
-    colour_ranges: &mut [ColourRange],
-    bucket_labels: &mut Vec<u32>,
-    histogram: &mut FnvHashMap<u32, u32>,
-    histogram_ranges: &mut FnvHashMap<u32, f32>,
-) {
-    trace!("begin compute_colour_ranges");
+struct HistogramColouring {
+    total_samples: usize,
+    bucket_labels: Vec<u32>,
+    histogram: FnvHashMap<u32, u32>,
+    histogram_ranges: FnvHashMap<u32, f32>,
+}
 
-    if !newly_escaped_pixels.is_empty() {
-        debug_assert!(colour_ranges.len() == (screen_size.width * screen_size.height) as usize);
-
-        histogram_ranges.clear();
-
-        for pixel in newly_escaped_pixels {
-            debug_assert!(pixel.escaped == 1);
-
-            colour_ranges[pixel.y as usize * screen_size.width as usize + pixel.x as usize]
-                .escaped = 1;
-
-            let value = histogram.entry(pixel.iteration_count).or_insert_with(|| {
-                bucket_labels.push(pixel.iteration_count);
-                0
-            });
-            *value += 1;
-            *total_samples += 1;
+impl HistogramColouring {
+    fn new() -> Self {
+        let total_samples = 0;
+        let bucket_labels: Vec<u32> = Vec::new();
+        let histogram: FnvHashMap<u32, u32> = FnvHashMap::default();
+        let histogram_ranges: FnvHashMap<u32, f32> = FnvHashMap::default();
+        Self {
+            total_samples,
+            bucket_labels,
+            histogram,
+            histogram_ranges,
         }
-
-        debug_assert_eq!(
-            *total_samples,
-            histogram.values().map(|value| *value as usize).sum()
-        );
-
-        debug_assert!(
-            bucket_labels.len()
-                == bucket_labels
-                    .iter()
-                    .copied()
-                    .collect::<FnvHashSet<u32>>()
-                    .len(),
-            "bucket_labels contains duplicates: {:?}",
-            bucket_labels
-        );
-        bucket_labels.sort();
-
-        let mut acc = 0;
-        let total_samples = *total_samples as f32;
-        for bucket_label in bucket_labels {
-            histogram_ranges.insert(*bucket_label, acc as f32 / total_samples);
-            acc += histogram.get(bucket_label).unwrap();
-        }
-
-        colour_ranges
-            .par_iter_mut()
-            .enumerate()
-            .for_each(|(index, colour_range)| {
-                let pixel = pixels[index];
-                if pixel.escaped == 1 {
-                    colour_range.value = histogram_ranges
-                        .get(&pixel.iteration_count)
-                        .copied()
-                        .unwrap_or_else(|| {
-                            panic!("{} was not in histogram_ranges", pixel.iteration_count)
-                        })
-                }
-            });
     }
 
-    trace!("end compute_colour_ranges");
+    fn reset(&mut self) {
+        self.total_samples = 0;
+        self.bucket_labels.clear();
+        self.histogram.clear();
+        self.histogram_ranges.clear();
+    }
+
+    fn update_colours(
+        &mut self,
+        screen_size: ScreenSize,
+        all_pixels: &[Pixel],
+        newly_escaped_pixels: &[Pixel],
+        colour_ranges: &mut [ColourRange],
+    ) {
+        trace!("begin compute_colour_ranges");
+
+        if !newly_escaped_pixels.is_empty() {
+            debug_assert!(colour_ranges.len() == (screen_size.width * screen_size.height) as usize);
+
+            self.histogram_ranges.clear();
+
+            for pixel in newly_escaped_pixels {
+                debug_assert!(pixel.escaped == 1);
+
+                colour_ranges[pixel.y as usize * screen_size.width as usize + pixel.x as usize]
+                    .escaped = 1;
+
+                let value = self
+                    .histogram
+                    .entry(pixel.iteration_count)
+                    .or_insert_with(|| {
+                        self.bucket_labels.push(pixel.iteration_count);
+                        0
+                    });
+                *value += 1;
+                self.total_samples += 1;
+            }
+
+            debug_assert_eq!(
+                self.total_samples,
+                self.histogram.values().map(|value| *value as usize).sum()
+            );
+
+            debug_assert!(
+                self.bucket_labels.len()
+                    == self
+                        .bucket_labels
+                        .iter()
+                        .copied()
+                        .collect::<FnvHashSet<u32>>()
+                        .len(),
+                "bucket_labels contains duplicates: {:?}",
+                self.bucket_labels
+            );
+            self.bucket_labels.sort();
+
+            let mut acc = 0;
+            let total_samples = self.total_samples as f32;
+            for bucket_label in &self.bucket_labels {
+                self.histogram_ranges
+                    .insert(*bucket_label, acc as f32 / total_samples);
+                acc += self.histogram.get(bucket_label).unwrap();
+            }
+
+            colour_ranges
+                .par_iter_mut()
+                .enumerate()
+                .for_each(|(index, colour_range)| {
+                    let pixel = all_pixels[index];
+                    if pixel.escaped == 1 {
+                        colour_range.value = self
+                            .histogram_ranges
+                            .get(&pixel.iteration_count)
+                            .copied()
+                            .unwrap_or_else(|| {
+                                panic!("{} was not in histogram_ranges", pixel.iteration_count)
+                            })
+                    }
+                });
+        }
+
+        trace!("end compute_colour_ranges");
+    }
 }
 
 fn main() {
@@ -468,13 +500,11 @@ fn main() {
     .with_usage(wgpu::BufferUsages::STORAGE)
     .create(&device);
 
-    let mut total_samples = 0;
     let mut colour_ranges: Vec<ColourRange> = std::iter::repeat(ColourRange::default())
         .take((screen_size.width * screen_size.height) as usize)
         .collect();
-    let mut bucket_labels: Vec<u32> = Vec::new();
-    let mut histogram: FnvHashMap<u32, u32> = FnvHashMap::default();
-    let mut histogram_ranges: FnvHashMap<u32, f32> = FnvHashMap::default();
+
+    let mut histogram_colouring = HistogramColouring::new();
 
     let mut all_pixels: Vec<Pixel> = create_pixels(screen_size);
     let mut unescaped_pixels: Vec<Pixel> = create_pixels(screen_size);
@@ -550,15 +580,12 @@ fn main() {
 
                     surface.configure(&device, &surface_configuration);
 
-                    total_samples = 0;
                     colour_ranges.clear();
                     colour_ranges.extend(
                         std::iter::repeat(ColourRange::default())
                             .take((screen_size.width * screen_size.height) as usize),
                     );
-                    bucket_labels.clear();
-                    histogram.clear();
-                    histogram_ranges.clear();
+                    histogram_colouring.reset();
 
                     screen_size_buffer.write(&queue, screen_size);
 
@@ -642,15 +669,13 @@ fn main() {
                 origin_changed = false;
 
                 if reset_buffers {
-                    total_samples = 0;
                     colour_ranges.clear();
                     colour_ranges.extend(
                         std::iter::repeat(ColourRange::default())
                             .take((screen_size.width * screen_size.height) as usize),
                     );
-                    bucket_labels.clear();
-                    histogram.clear();
-                    histogram_ranges.clear();
+                    histogram_colouring.reset();
+                    
                     let pixels = create_pixels(screen_size);
                     pixels_buffers.input.write(&queue, &pixels);
                     pixels_buffers.output.write(&queue, &pixels);
@@ -827,15 +852,11 @@ fn main() {
 
                 pixels_staging_buffer.buffer().unmap();
 
-                compute_colour_ranges(
+                histogram_colouring.update_colours(
                     screen_size,
                     &all_pixels,
                     &newly_escaped_pixels,
-                    &mut total_samples,
                     &mut colour_ranges,
-                    &mut bucket_labels,
-                    &mut histogram,
-                    &mut histogram_ranges,
                 );
                 debug_assert!(
                     colour_ranges.len() == screen_size.width as usize * screen_size.height as usize,
