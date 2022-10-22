@@ -18,23 +18,21 @@ struct ColourRange{escaped : u32, value : f32}
 
 fn compute_colour(colour_range : ColourRange) -> vec4<f32> {
   let gamma = vec3<f32>(2.2, 2.2, 2.2);
-  let initial_colour = vec3<f32>(15.0 / 255.0, 66.0 / 255.0, 7.0 / 255.0);
+  let initial_colour = pow(vec3<f32>(15.0 / 255.0, 66.0 / 255.0, 7.0 / 255.0), gamma);
+  let final_colour = pow(vec3<f32>(1.0, 1.0, 1.0), gamma);
+  let unescaped = pow(vec3<f32>(0.0, 0.0, 0.0), gamma);
   
   if colour_range.escaped == 1u {
-    let final_colour = vec3<f32>(1.0, 1.0, 1.0);
     return vec4<f32>(
-      pow(
-        vec3<f32>(
-          initial_colour.r + (final_colour.r - initial_colour.r) * colour_range.value,
-          initial_colour.g + (final_colour.g - initial_colour.g) * colour_range.value,
-          initial_colour.b + (final_colour.b - initial_colour.b) * colour_range.value
-        ), 
-        gamma
+      vec3<f32>(
+        initial_colour.r + (final_colour.r - initial_colour.r) * pow(colour_range.value, 2.0),
+        initial_colour.g + (final_colour.g - initial_colour.g) * pow(colour_range.value, 2.0),
+        initial_colour.b + (final_colour.b - initial_colour.b) * pow(colour_range.value, 2.0)
       ),
       1.0
     );
   } else {
-    return vec4<f32>(pow(initial_colour, gamma), 1.0);
+    return vec4<f32>(unescaped, 1.0);
   }
 }
 

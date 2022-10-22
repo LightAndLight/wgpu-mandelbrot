@@ -59,10 +59,6 @@ impl Complex {
     };
 }
 
-// alignment: 4
-// unpadded size: 4 + 4 + 8 + 4 + 4 = 24
-// size is a multiple of alignment
-// requires 0 bytes padding
 #[repr(C)]
 #[derive(Pod, Zeroable, Clone, Copy, Debug)]
 struct Pixel {
@@ -142,6 +138,11 @@ fn compute_colour_ranges(
             *value += 1;
             *total_samples += 1;
         }
+
+        debug_assert_eq!(
+            *total_samples,
+            histogram.values().map(|value| *value as usize).sum()
+        );
 
         debug_assert!(
             bucket_labels.len()
@@ -790,10 +791,24 @@ fn main() {
                     let pixels_staging_buffer_view: buffer::View<Pixel> =
                         pixels_staging_buffer_slice.get_mapped_range();
 
+                    let unescaped_pixels_len = unescaped_pixels.len();
                     unescaped_pixels.clear();
                     newly_escaped_pixels.clear();
 
-                    pixels_staging_buffer_view.iter().for_each(|pixel| {
+                    pixels_staging_buffer_view
+                        .iter()
+                        /*
+                        This caused a bug for me: even though I copy `unescaped_pixels.len()`
+                        worth of data into the staging buffer, the buffer is still the size
+                        of the screen.
+
+                        Without the `take`, I was iterating over every pixel in the buffer.
+                        Everything after `unescaped_pixels.len()` in the buffer is effectively
+                        garbage (leftover from previous runs), but I was including it in the
+                        `newly_escaped` array anyway.
+                        */
+                        .take(unescaped_pixels_len)
+                        .for_each(|pixel| {
                         let pixel = *pixel;
 
                         debug_assert!(pixel.x < screen_size.width);
