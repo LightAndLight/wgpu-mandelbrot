@@ -223,7 +223,7 @@ const MANDELBROT_DISPATCH_SIZE_Y: u32 = 1024;
 /**
 Dispatch size for `compute.wgsl#mandelbrot`
 
-https://www.w3.org/TR/WGSL/#compute-shader-workgroups
+[WGSL compute shader workgroups reference](https://www.w3.org/TR/WGSL/#compute-shader-workgroups)
 
 For a single workgroup, a compute entrypoint with `@workgroup_size(w_x, w_y, w_z)`,
 is run `w_x * w_y * w_z` times. A call to `dispatch_workgroups(x, y, z)` runs `x * y * z`
@@ -235,8 +235,7 @@ use the `global_invocation_id` to index into the pixel data buffer to process
 each pixel, potentially in parallel.
 
 To simply things I started with `@workgroup_size(1, 1, 1)`, which seems to roughly
-correspond to 1 invocation per streaming multiprocessor
-(https://stackoverflow.com/questions/34638336/calculating-the-right-number-of-workgroups-and-their-size-opencl).
+correspond to 1 invocation per streaming multiprocessor[^stackoverflow-workgroups].
 Then used a dispatch size of `(total_work, 1, 1)`. The pixel data index would
 be `global_invocation_id.x`.
 
@@ -264,7 +263,7 @@ The pixel data index's formula now looks like this:
 With `@workgroup_size(1, 1, 1)`, the graphics card might only run a single invocation
 per streaming multiprocessor (SM). There's more opportunity for parallelism. My
 Nvidia RTX 2070 apparently has 2304 threads across 36 SMs, which works out to
-64 threads per SM (reference: https://en.wikipedia.org/wiki/GeForce_20_series#GeForce_20_(20xx)_series_for_desktops).
+64 threads per SM[^geforce-20].
 I want to aim for 64 invocations per workgroup to increase my
 chances of parallelism.
 
@@ -280,6 +279,10 @@ There's a problem: 64 doesn't evenly divide 65535. But we have `65536 / 64 = 102
 use 1024 for the dispatch `y` size. Which means we need to divide `total_work` into chunks
 of `1024 (dispatch y size) * 64 (workgroup y size) = 65536`. This gives `(total_work / (1024 * 64) + 1, 1024, 1)`.
 This means the correct pixel index formula is `global_invocation_id.x * (1024 * 64) + global_invocation_id.y`.
+
+[^stackoverflow-workgroups]: <https://stackoverflow.com/questions/34638336/calculating-the-right-number-of-workgroups-and-their-size-opencl>
+
+[^geforce-20]: <https://en.wikipedia.org/wiki/GeForce_20_series#GeForce_20_(20xx)_series_for_desktops>
 */
 fn mandelbrot_dispatch_size(total_work: usize) -> (u32, u32, u32) {
     let x = (total_work / (MANDELBROT_DISPATCH_SIZE_Y * MANDELBROT_WORKGROUP_SIZE_Y) as usize + 1)
