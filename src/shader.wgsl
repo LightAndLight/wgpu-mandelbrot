@@ -15,20 +15,20 @@ struct ColourRange{escaped : u32, value : f32}
 @group(0) @binding(0) var<uniform> screen_size : vec2<u32>;
 
 @group(1) @binding(0) var<storage, read> colour_ranges : array<ColourRange>;
+  
+let GAMMA = vec3<f32>(2.2, 2.2, 2.2);
+let EXPONENT = vec3<f32>(2.0, 2.0, 2.0);
 
 fn compute_colour(colour_range : ColourRange) -> vec4<f32> {
-  let gamma = vec3<f32>(2.2, 2.2, 2.2);
-  let initial_colour = pow(vec3<f32>(15.0 / 255.0, 66.0 / 255.0, 7.0 / 255.0), gamma);
-  let final_colour = pow(vec3<f32>(1.0, 1.0, 1.0), gamma);
-  let unescaped = pow(vec3<f32>(0.0, 0.0, 0.0), gamma);
+  let unescaped = pow(vec3<f32>(0.0, 0.0, 0.0), GAMMA);
+  let initial_colour = pow(vec3<f32>(15.0 / 255.0, 66.0 / 255.0, 7.0 / 255.0), GAMMA);
+  let final_colour = pow(vec3<f32>(1.0, 1.0, 1.0), GAMMA);
+  
+  let scale = vec3<f32>(colour_range.value, colour_range.value, colour_range.value);
   
   if colour_range.escaped == 1u {
     return vec4<f32>(
-      vec3<f32>(
-        initial_colour.r + (final_colour.r - initial_colour.r) * pow(colour_range.value, 2.0),
-        initial_colour.g + (final_colour.g - initial_colour.g) * pow(colour_range.value, 2.0),
-        initial_colour.b + (final_colour.b - initial_colour.b) * pow(colour_range.value, 2.0)
-      ),
+      initial_colour + (final_colour - initial_colour) * pow(scale, EXPONENT),
       1.0
     );
   } else {
