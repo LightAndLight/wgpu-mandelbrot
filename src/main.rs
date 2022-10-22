@@ -1,12 +1,8 @@
 use std::sync::{Arc, Condvar, Mutex};
 
 use bytemuck::{Pod, Zeroable};
-use fnv::{FnvHashMap, FnvHashSet};
 use log::{debug, trace};
-use rayon::{
-    prelude::{IndexedParallelIterator, IntoParallelRefMutIterator, ParallelIterator},
-    ThreadPoolBuilder,
-};
+use rayon::ThreadPoolBuilder;
 use winit::{
     event::{Event, WindowEvent},
     event_loop::{ControlFlow, EventLoop},
@@ -14,57 +10,15 @@ use winit::{
 };
 
 use wgpu_mandelbrot::{
-    command_buffer, command_encoder::CommandEncoderExt, compute, typed_buffer, var,
+    colour::{ColourRange, HistogramColouring},
+    command_buffer,
+    command_encoder::CommandEncoderExt,
+    compute,
+    pixel::{Complex, Pixel},
+    screen, typed_buffer, var,
 };
 
-#[repr(C)]
-#[derive(Pod, Zeroable, Clone, Copy, Debug)]
-struct ColourRange {
-    escaped: u32,
-    value: f32,
-}
-
-impl Default for ColourRange {
-    fn default() -> Self {
-        Self {
-            escaped: 0,
-            value: 0.0,
-        }
-    }
-}
-
-#[repr(C)]
-#[derive(Pod, Zeroable, Clone, Copy, Debug)]
-struct ScreenSize {
-    width: u32,
-    height: u32,
-}
-
-#[repr(C)]
-#[derive(Pod, Zeroable, Clone, Copy, Debug)]
-struct Complex {
-    real: f32,
-    imaginary: f32,
-}
-
-impl Complex {
-    const ZERO: Self = Complex {
-        real: 0.0,
-        imaginary: 0.0,
-    };
-}
-
-#[repr(C)]
-#[derive(Pod, Zeroable, Clone, Copy, Debug)]
-struct Pixel {
-    x: u32,
-    y: u32,
-    escaped: u32,
-    current_value: Complex,
-    iteration_count: u32,
-}
-
-fn create_pixels(size: ScreenSize) -> Vec<Pixel> {
+fn create_pixels(size: screen::Size) -> Vec<Pixel> {
     (0..size.height)
         .flat_map(move |y| {
             (0..size.width).map(move |x| Pixel {
@@ -80,7 +34,7 @@ fn create_pixels(size: ScreenSize) -> Vec<Pixel> {
 
 fn create_pixels_buffers(
     device: &wgpu::Device,
-    size: ScreenSize,
+    size: screen::Size,
 ) -> typed_buffer::DoubleBuffer<Pixel> {
     let pixels = create_pixels(size);
 
@@ -104,112 +58,6 @@ fn create_pixels_buffers(
 struct Vec2 {
     x: f32,
     y: f32,
-}
-
-struct HistogramColouring {
-    total_samples: usize,
-    bucket_labels: Vec<u32>,
-    histogram: FnvHashMap<u32, u32>,
-    histogram_ranges: FnvHashMap<u32, f32>,
-}
-
-impl HistogramColouring {
-    fn new() -> Self {
-        let total_samples = 0;
-        let bucket_labels: Vec<u32> = Vec::new();
-        let histogram: FnvHashMap<u32, u32> = FnvHashMap::default();
-        let histogram_ranges: FnvHashMap<u32, f32> = FnvHashMap::default();
-        Self {
-            total_samples,
-            bucket_labels,
-            histogram,
-            histogram_ranges,
-        }
-    }
-
-    fn reset(&mut self) {
-        self.total_samples = 0;
-        self.bucket_labels.clear();
-        self.histogram.clear();
-        self.histogram_ranges.clear();
-    }
-
-    fn update_colours(
-        &mut self,
-        screen_size: ScreenSize,
-        all_pixels: &[Pixel],
-        newly_escaped_pixels: &[Pixel],
-        colour_ranges: &mut [ColourRange],
-    ) {
-        trace!("begin compute_colour_ranges");
-
-        if !newly_escaped_pixels.is_empty() {
-            debug_assert!(colour_ranges.len() == (screen_size.width * screen_size.height) as usize);
-
-            self.histogram_ranges.clear();
-
-            for pixel in newly_escaped_pixels {
-                debug_assert!(pixel.escaped == 1);
-
-                colour_ranges[pixel.y as usize * screen_size.width as usize + pixel.x as usize]
-                    .escaped = 1;
-
-                let value = self
-                    .histogram
-                    .entry(pixel.iteration_count)
-                    .or_insert_with(|| {
-                        self.bucket_labels.push(pixel.iteration_count);
-                        0
-                    });
-                *value += 1;
-                self.total_samples += 1;
-            }
-
-            debug_assert_eq!(
-                self.total_samples,
-                self.histogram.values().map(|value| *value as usize).sum()
-            );
-
-            debug_assert!(
-                self.bucket_labels.len()
-                    == self
-                        .bucket_labels
-                        .iter()
-                        .copied()
-                        .collect::<FnvHashSet<u32>>()
-                        .len(),
-                "bucket_labels contains duplicates: {:?}",
-                self.bucket_labels
-            );
-            self.bucket_labels.sort();
-
-            let mut acc = 0;
-            let total_samples = self.total_samples as f32;
-            for bucket_label in &self.bucket_labels {
-                self.histogram_ranges
-                    .insert(*bucket_label, acc as f32 / total_samples);
-                acc += self.histogram.get(bucket_label).unwrap();
-            }
-
-            colour_ranges
-                .par_iter_mut()
-                .enumerate()
-                .for_each(|(index, colour_range)| {
-                    let pixel = all_pixels[index];
-                    if pixel.escaped == 1 {
-                        colour_range.value = self
-                            .histogram_ranges
-                            .get(&pixel.iteration_count)
-                            .copied()
-                            .unwrap_or_else(|| {
-                                panic!("{} was not in histogram_ranges", pixel.iteration_count)
-                            })
-                    }
-                });
-        }
-
-        trace!("end compute_colour_ranges");
-    }
 }
 
 fn main() {
@@ -420,7 +268,7 @@ fn main() {
         multiview: None,
     });
 
-    let mut screen_size = ScreenSize {
+    let mut screen_size = screen::Size {
         width: size.width as u32,
         height: size.height as u32,
     };
@@ -569,7 +417,7 @@ fn main() {
                 WindowEvent::Resized(new_size) => {
                     debug!("resizing to {:?}", new_size);
                     size = new_size;
-                    screen_size = ScreenSize {
+                    screen_size = screen::Size {
                         width: size.width as u32,
                         height: size.height as u32,
                     };
