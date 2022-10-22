@@ -1,3 +1,16 @@
+/*!
+Typed `wgpu` buffers.
+
+[`bytemuck`](https://docs.rs/bytemuck/latest/bytemuck/) seems to be the
+recommended way to cast Rust datatypes to bytes that can be sent to the GPU
+([example](https://github.com/gfx-rs/wgpu/blob/d3ab5a197ed61b80d264bde150f76538d0c129a6/wgpu/examples/cube/main.rs)).
+
+Casting in applications is error prone; you might create a buffer that's "supposed to"
+contain `A`s, but nothing will stop you from writing a bunch of `B`s to it.
+
+This module provides a type safe buffer API.
+*/
+
 use std::{
     marker::PhantomData,
     mem::size_of,
@@ -164,5 +177,21 @@ impl<'a, A: bytemuck::Pod + bytemuck::Zeroable> Builder<'a, A> {
             buffer,
             phantom_data: PhantomData,
         }
+    }
+}
+
+pub struct DoubleBuffer<A> {
+    pub input: Buffer<A>,
+    pub output: Buffer<A>,
+}
+
+impl<A: bytemuck::Pod + bytemuck::Zeroable> DoubleBuffer<A> {
+    pub fn swap(&mut self) {
+        std::mem::swap(&mut self.input, &mut self.output)
+    }
+
+    pub fn destroy(self) {
+        self.input.destroy();
+        self.output.destroy();
     }
 }

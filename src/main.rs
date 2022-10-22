@@ -1,7 +1,6 @@
-mod buffer;
 mod command_buffer;
 mod command_encoder;
-mod double_buffered;
+mod typed_buffer;
 mod var;
 
 use std::sync::{Arc, Condvar, Mutex};
@@ -20,7 +19,6 @@ use winit::{
 };
 
 use command_encoder::CommandEncoderExt;
-use double_buffered::DoubleBuffered;
 
 #[repr(C)]
 #[derive(Pod, Zeroable, Clone, Copy, Debug)]
@@ -83,17 +81,20 @@ fn create_pixels(size: ScreenSize) -> Vec<Pixel> {
         .collect::<Vec<_>>()
 }
 
-fn create_pixels_buffers(device: &wgpu::Device, size: ScreenSize) -> DoubleBuffered<Pixel> {
+fn create_pixels_buffers(
+    device: &wgpu::Device,
+    size: ScreenSize,
+) -> typed_buffer::DoubleBuffer<Pixel> {
     let pixels = create_pixels(size);
 
-    DoubleBuffered {
-        input: buffer::Builder::from_contents(&pixels)
+    typed_buffer::DoubleBuffer {
+        input: typed_buffer::Builder::from_contents(&pixels)
             .with_label("pixels_buffer_1")
             .with_usage(wgpu::BufferUsages::STORAGE)
             .with_usage(wgpu::BufferUsages::COPY_SRC)
             .create(device),
 
-        output: buffer::Builder::from_contents(&pixels)
+        output: typed_buffer::Builder::from_contents(&pixels)
             .with_label("pixels_buffer_2")
             .with_usage(wgpu::BufferUsages::STORAGE)
             .with_usage(wgpu::BufferUsages::COPY_SRC)
@@ -523,8 +524,8 @@ fn main() {
         .with_usage(wgpu::BufferUsages::UNIFORM)
         .create(&device);
 
-    let mut pixels_staging_buffer: buffer::Buffer<Pixel> =
-        buffer::Builder::new(screen_size.width as u64 * screen_size.height as u64)
+    let mut pixels_staging_buffer: typed_buffer::Buffer<Pixel> =
+        typed_buffer::Builder::new(screen_size.width as u64 * screen_size.height as u64)
             .with_label("pixels_staging_buffer")
             .with_usage(wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ)
             .create(&device);
@@ -569,13 +570,14 @@ fn main() {
     let mut zoom_changed = false;
     let mut origin_changed = false;
 
-    let mut colour_ranges_buffer: buffer::Buffer<ColourRange> = buffer::Builder::from_contents(
-        &std::iter::repeat(ColourRange::default())
-            .take((screen_size.width * screen_size.height) as usize)
-            .collect::<Vec<_>>(),
-    )
-    .with_usage(wgpu::BufferUsages::STORAGE)
-    .create(&device);
+    let mut colour_ranges_buffer: typed_buffer::Buffer<ColourRange> =
+        typed_buffer::Builder::from_contents(
+            &std::iter::repeat(ColourRange::default())
+                .take((screen_size.width * screen_size.height) as usize)
+                .collect::<Vec<_>>(),
+        )
+        .with_usage(wgpu::BufferUsages::STORAGE)
+        .create(&device);
 
     let mut colour_ranges: Vec<ColourRange> = std::iter::repeat(ColourRange::default())
         .take((screen_size.width * screen_size.height) as usize)
@@ -666,11 +668,12 @@ fn main() {
 
                     screen_size_buffer.write(&queue, screen_size);
 
-                    pixels_staging_buffer =
-                        buffer::Builder::new(screen_size.width as u64 * screen_size.height as u64)
-                            .with_label("pixels_staging_buffer")
-                            .with_usage(wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ)
-                            .create(&device);
+                    pixels_staging_buffer = typed_buffer::Builder::new(
+                        screen_size.width as u64 * screen_size.height as u64,
+                    )
+                    .with_label("pixels_staging_buffer")
+                    .with_usage(wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ)
+                    .create(&device);
 
                     std::mem::replace(
                         &mut pixels_buffers,
@@ -682,7 +685,7 @@ fn main() {
 
                     std::mem::replace(
                         &mut colour_ranges_buffer,
-                        buffer::Builder::from_contents(
+                        typed_buffer::Builder::from_contents(
                             &std::iter::repeat(ColourRange::default())
                                 .take((screen_size.width * screen_size.height) as usize)
                                 .collect::<Vec<_>>(),
@@ -867,7 +870,7 @@ fn main() {
                 }
 
                 {
-                    let pixels_staging_buffer_view: buffer::View<Pixel> =
+                    let pixels_staging_buffer_view: typed_buffer::View<Pixel> =
                         pixels_staging_buffer_slice.get_mapped_range();
 
                     let unescaped_pixels_len = unescaped_pixels.len();
