@@ -186,7 +186,7 @@ fn main() {
     env_logger::init();
 
     ThreadPoolBuilder::new()
-        .num_threads(4)
+        .num_threads(num_cpus::get_physical())
         .build_global()
         .unwrap();
 

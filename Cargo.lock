@@ -714,6 +714,7 @@ dependencies = [
  "env_logger",
  "fnv",
  "log",
+ "num_cpus",
  "pollster",
  "rayon",
  "wgpu",
