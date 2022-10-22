@@ -127,6 +127,8 @@ fn compute_colour_ranges(
     if !newly_escaped_pixels.is_empty() {
         debug_assert!(colour_ranges.len() == (screen_size.width * screen_size.height) as usize);
 
+        histogram_ranges.clear();
+
         for pixel in newly_escaped_pixels {
             debug_assert!(pixel.escaped == 1);
 
@@ -153,14 +155,11 @@ fn compute_colour_ranges(
         );
         bucket_labels.sort();
 
-        let mut bucket_level = 0.0;
+        let mut acc = 0;
+        let total_samples = *total_samples as f32;
         for bucket_label in bucket_labels {
-            let bucket_value = histogram.get(bucket_label).unwrap();
-
-            let old_bucket_level = bucket_level;
-            bucket_level = old_bucket_level + *bucket_value as f32 / *total_samples as f32;
-
-            histogram_ranges.insert(*bucket_label, old_bucket_level);
+            histogram_ranges.insert(*bucket_label, acc as f32 / total_samples);
+            acc += histogram.get(bucket_label).unwrap();
         }
 
         colour_ranges

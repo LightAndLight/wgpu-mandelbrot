@@ -21,7 +21,6 @@ fn compute_colour(colour_range : ColourRange) -> vec4<f32> {
   let initial_colour = vec3<f32>(15.0 / 255.0, 66.0 / 255.0, 7.0 / 255.0);
   
   if colour_range.escaped == 1u {
-    // let final_colour = vec3<f32>(200.0 / 255.0, 200.0 / 255.0, 200.0 / 255.0);
     let final_colour = vec3<f32>(1.0, 1.0, 1.0);
     return vec4<f32>(
       pow(
