@@ -195,3 +195,20 @@ impl<A: bytemuck::Pod + bytemuck::Zeroable> DoubleBuffer<A> {
         self.output.destroy();
     }
 }
+
+pub fn copy_buffer_to_buffer<A: bytemuck::Pod + bytemuck::Zeroable>(
+    command_encoder: &mut wgpu::CommandEncoder,
+    source: &Buffer<A>,
+    source_index: u64,
+    destination: &Buffer<A>,
+    destination_index: u64,
+    copy_size: u64,
+) {
+    command_encoder.copy_buffer_to_buffer(
+        source.buffer(),
+        source_index * size_of::<A>() as u64,
+        destination.buffer(),
+        destination_index * size_of::<A>() as u64,
+        copy_size * size_of::<A>() as u64,
+    )
+}

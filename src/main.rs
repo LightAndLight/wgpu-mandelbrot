@@ -820,14 +820,13 @@ fn main() {
                         );
                         command_encoder.pop_debug_group();
 
-                        command_encoder.copy_buffer_to_buffer(
-                            pixels_buffers.output.buffer(),
+                        typed_buffer::copy_buffer_to_buffer(
+                            command_encoder,
+                            &pixels_buffers.output,
                             0,
-                            pixels_staging_buffer.buffer(),
+                            &pixels_staging_buffer,
                             0,
-                            (std::mem::size_of::<Pixel>() * unescaped_pixels.len())
-                                .try_into()
-                                .unwrap(),
+                            unescaped_pixels.len().try_into().unwrap(),
                         );
                     },
                 );
