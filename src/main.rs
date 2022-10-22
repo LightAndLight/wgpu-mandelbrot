@@ -1,8 +1,3 @@
-mod command_buffer;
-mod command_encoder;
-mod typed_buffer;
-mod var;
-
 use std::sync::{Arc, Condvar, Mutex};
 
 use bytemuck::{Pod, Zeroable};
@@ -18,7 +13,7 @@ use winit::{
     window::WindowBuilder,
 };
 
-use command_encoder::CommandEncoderExt;
+use wgpu_mandelbrot::{command_buffer, command_encoder::CommandEncoderExt, typed_buffer, var};
 
 #[repr(C)]
 #[derive(Pod, Zeroable, Clone, Copy, Debug)]
