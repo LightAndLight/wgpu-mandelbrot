@@ -419,14 +419,14 @@ fn main() {
 
     let render_shader_module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
         label: Some("render-shader"),
-        source: wgpu::ShaderSource::Wgsl(include_str!("shader.wgsl").into()),
+        source: wgpu::ShaderSource::Wgsl(include_str!("render.wgsl").into()),
     });
 
     let render_bind_group_layout_1 =
         device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("render-bind-group-layout"),
             entries: &[
-                // shader.wgsl#screen_size
+                // render.wgsl#screen_size
                 wgpu::BindGroupLayoutEntry {
                     binding: 0,
                     visibility: wgpu::ShaderStages::FRAGMENT,
@@ -444,7 +444,7 @@ fn main() {
         device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("render-bind-group-layout-2"),
             entries: &[
-                // shader.wgsl#colour_ranges
+                // render.wgsl#colour_ranges
                 wgpu::BindGroupLayoutEntry {
                     binding: 0,
                     visibility: wgpu::ShaderStages::FRAGMENT,
@@ -553,7 +553,7 @@ fn main() {
         label: Some("render-bind-group"),
         layout: &render_pipeline.get_bind_group_layout(0),
         entries: &[
-            // shader.wgsl#screen_size
+            // render.wgsl#screen_size
             wgpu::BindGroupEntry {
                 binding: 0,
                 resource: screen_size_buffer.binding_resource(),
@@ -716,7 +716,7 @@ fn main() {
                         label: Some("render-bind-group"),
                         layout: &render_pipeline.get_bind_group_layout(0),
                         entries: &[
-                            // shader.wgsl#screen_size
+                            // render.wgsl#screen_size
                             wgpu::BindGroupEntry {
                                 binding: 0,
                                 resource: screen_size_buffer.binding_resource(),
@@ -784,7 +784,7 @@ fn main() {
                     label: Some("render-bind-group-2"),
                     layout: &render_pipeline.get_bind_group_layout(1),
                     entries: &[
-                        // shader.wgsl#colour_ranges
+                        // render.wgsl#colour_ranges
                         wgpu::BindGroupEntry {
                             binding: 0,
                             resource: colour_ranges_buffer.binding_resource(0, None),
