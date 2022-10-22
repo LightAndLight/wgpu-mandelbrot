@@ -63,9 +63,12 @@ on the screen, and sample the results texture for its color.
 @group(1) @binding(0) var<storage, read> input : array<Pixel>;
 @group(1) @binding(1) var<storage, read_write> output : array<Pixel>;
 
+let MANDELBROT_DISPATCH_SIZE_Y = 1024u;
+let MANDELBROT_WORKGROUP_SIZE_Y = 64u;
+
 @compute @workgroup_size(1, 64, 1)
 fn mandelbrot(@builtin(global_invocation_id) global_invocation_id: vec3<u32>) {
-  let index = global_invocation_id.x * 65535u + global_invocation_id.y;
+  let index = global_invocation_id.x * (MANDELBROT_DISPATCH_SIZE_Y * MANDELBROT_WORKGROUP_SIZE_Y) + global_invocation_id.y;
   
   let pixel = input[index];
   
