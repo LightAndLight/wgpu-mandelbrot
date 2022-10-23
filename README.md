@@ -14,9 +14,11 @@ A realtime mandelbrot renderer using [wgpu](https://github.com/gfx-rs/wgpu).
 
 ## Screenshots
 
-<img src="images/screenshot-1.png" />
+<img src="images/screenshot-1.png" alt="A section of the Mandelbrot set, with a green-to-white
+colour palette."/>
 
-<img src="images/screenshot-2.png" />
+<img src="images/screenshot-1.png" alt="A section of the Mandelbrot set, with a green-to-white
+colour palette."/>
 
 ## Usage
 
