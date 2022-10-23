@@ -14,7 +14,9 @@ A realtime mandelbrot renderer using [wgpu](https://github.com/gfx-rs/wgpu).
 
 ## Screenshots
 
-![](./images/screenshot-1.png) ![](./images/screenshot-2.png)
+<img src="images/screenshot-1.png" />
+
+<img src="images/screenshot-2.png" />
 
 ## Usage
 
