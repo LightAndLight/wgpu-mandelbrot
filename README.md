@@ -14,10 +14,7 @@ A realtime mandelbrot renderer using [wgpu](https://github.com/gfx-rs/wgpu).
 
 ## Screenshots
 
-<div style="display: flex; flex-direction: flex-row">
-<div style="margin: 0.5em;"><img src="images/screenshot-1.png" /></div>
-<div style="margin: 0.5em;"><img src="images/screenshot-2.png" /></div>
-</div>
+![](./images/screenshot-1.png) ![](./images/screenshot-2.png)
 
 ## Usage
 
