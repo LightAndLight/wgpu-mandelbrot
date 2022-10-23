@@ -1,5 +1,8 @@
+//! Pixel data.
+
 use bytemuck::{Pod, Zeroable};
 
+/// [`bytemuck`]-compatible complex numbers.
 #[repr(C)]
 #[derive(Pod, Zeroable, Clone, Copy, Debug)]
 pub struct Complex {
@@ -14,6 +17,7 @@ impl Complex {
     };
 }
 
+/// Pixel data for rendering fractals.
 #[repr(C)]
 #[derive(Pod, Zeroable, Clone, Copy, Debug)]
 pub struct Pixel {

@@ -1,3 +1,5 @@
+//! Compute shader functions.
+
 /// Workgroup size for `compute.wsgl#mandelbrot`.
 pub const MANDELBROT_WORKGROUP_SIZE_Y: u32 = 64;
 
@@ -5,7 +7,7 @@ pub const MANDELBROT_WORKGROUP_SIZE_Y: u32 = 64;
 pub const MANDELBROT_DISPATCH_SIZE_Y: u32 = 1024;
 
 /**
-Dispatch size for `compute.wgsl#mandelbrot`
+Compute the dispatch size for `compute.wgsl#mandelbrot`.
 
 [WGSL compute shader workgroups reference](https://www.w3.org/TR/WGSL/#compute-shader-workgroups)
 

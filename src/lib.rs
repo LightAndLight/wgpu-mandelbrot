@@ -5,4 +5,3 @@ pub mod compute;
 pub mod pixel;
 pub mod screen;
 pub mod typed_buffer;
-pub mod var;

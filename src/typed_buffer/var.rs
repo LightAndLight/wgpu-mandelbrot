@@ -1,3 +1,4 @@
+//! Single-element buffers.
 use std::marker::PhantomData;
 
 use wgpu::util::DeviceExt;

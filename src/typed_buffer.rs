@@ -11,6 +11,8 @@ contain `A`s, but nothing will stop you from writing a bunch of `B`s to it.
 This module provides a type safe buffer API.
 */
 
+pub mod var;
+
 use std::{
     marker::PhantomData,
     mem::size_of,
@@ -20,6 +22,7 @@ use std::{
 
 use wgpu::util::DeviceExt;
 
+/// A typed [`wgpu::Buffer`].
 pub struct Buffer<A> {
     buffer: wgpu::Buffer,
     phantom_data: PhantomData<A>,
@@ -54,6 +57,7 @@ impl<A: bytemuck::Pod + bytemuck::Zeroable> Buffer<A> {
     }
 }
 
+/// A typed [`wgpu::BufferSlice`].
 pub struct Slice<'a, A> {
     slice: wgpu::BufferSlice<'a>,
     phantom_data: PhantomData<A>,
@@ -83,6 +87,7 @@ impl<'a, A> Slice<'a, A> {
     }
 }
 
+/// A typed [`wgpu::BufferView`].
 pub struct View<'a, A> {
     view: wgpu::BufferView<'a>,
     phantom_data: PhantomData<A>,
@@ -96,6 +101,7 @@ impl<'a, A: bytemuck::Pod + bytemuck::Zeroable> Deref for View<'a, A> {
     }
 }
 
+/// A typed [`wgpu::BufferViewMut`].
 pub struct ViewMut<'a, A> {
     view_mut: wgpu::BufferViewMut<'a>,
     phantom_data: PhantomData<A>,
@@ -120,6 +126,13 @@ enum Contents<'a> {
     Size(u64),
 }
 
+/**
+A [`Buffer`] builder.
+
+Use [`Builder::from`] to create a buffer that contains data.
+
+Use [`Builder::new`] to create an empty buffer of a specific size.
+*/
 pub struct Builder<'a, A> {
     label: Option<&'a str>,
     contents: Contents<'a>,
@@ -182,22 +195,11 @@ impl<'a, A: bytemuck::Pod + bytemuck::Zeroable> Builder<'a, A> {
     }
 }
 
-pub struct DoubleBuffer<A> {
-    pub input: Buffer<A>,
-    pub output: Buffer<A>,
-}
+/**
+A typed version of [`wgpu::CommandEncoder::copy_buffer_to_buffer`].
 
-impl<A: bytemuck::Pod + bytemuck::Zeroable> DoubleBuffer<A> {
-    pub fn swap(&mut self) {
-        std::mem::swap(&mut self.input, &mut self.output)
-    }
-
-    pub fn destroy(self) {
-        self.input.destroy();
-        self.output.destroy();
-    }
-}
-
+`source_index`, `destination_index`, and `copy_size` count buffer items, not bytes.
+*/
 pub fn copy_buffer_to_buffer<A: bytemuck::Pod + bytemuck::Zeroable>(
     command_encoder: &mut wgpu::CommandEncoder,
     source: &Buffer<A>,
@@ -213,4 +215,21 @@ pub fn copy_buffer_to_buffer<A: bytemuck::Pod + bytemuck::Zeroable>(
         destination_index * size_of::<A>() as u64,
         copy_size * size_of::<A>() as u64,
     )
+}
+
+/// A structure for double-buffering.
+pub struct DoubleBuffer<A> {
+    pub input: Buffer<A>,
+    pub output: Buffer<A>,
+}
+
+impl<A: bytemuck::Pod + bytemuck::Zeroable> DoubleBuffer<A> {
+    pub fn swap(&mut self) {
+        std::mem::swap(&mut self.input, &mut self.output)
+    }
+
+    pub fn destroy(self) {
+        self.input.destroy();
+        self.output.destroy();
+    }
 }

@@ -1,3 +1,6 @@
+//! Functions for working with [`wgpu::CommandBuffer`]s.
+
+/// A scoped alternative to [`wgpu::Device::create_command_encoder`] and [`wgpu::CommandEncoder::finish`].
 pub fn create(
     device: &wgpu::Device,
     descriptor: &wgpu::CommandEncoderDescriptor,

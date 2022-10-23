@@ -15,7 +15,7 @@ use wgpu_mandelbrot::{
     command_encoder::CommandEncoderExt,
     compute,
     pixel::{Complex, Pixel},
-    screen, typed_buffer, var,
+    screen, typed_buffer,
 };
 
 fn create_pixels(size: screen::Size) -> Vec<Pixel> {
@@ -272,13 +272,13 @@ fn main() {
         width: size.width as u32,
         height: size.height as u32,
     };
-    let screen_size_buffer = var::Builder::new(screen_size)
+    let screen_size_buffer = typed_buffer::var::Builder::new(screen_size)
         .with_label("screen-size-buffer")
         .with_usage(wgpu::BufferUsages::UNIFORM)
         .create(&device);
 
     let mut zoom: f32 = 1.0;
-    let zoom_buffer = var::Builder::new(zoom)
+    let zoom_buffer = typed_buffer::var::Builder::new(zoom)
         .with_label("zoom-buffer")
         .with_usage(wgpu::BufferUsages::UNIFORM)
         .create(&device);
@@ -287,7 +287,7 @@ fn main() {
         x: -0.74529,
         y: 0.113075,
     };
-    let origin_buffer = var::Builder::new(origin)
+    let origin_buffer = typed_buffer::var::Builder::new(origin)
         .with_label("origin-buffer")
         .with_usage(wgpu::BufferUsages::UNIFORM)
         .create(&device);

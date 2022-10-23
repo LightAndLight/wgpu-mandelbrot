@@ -1,3 +1,5 @@
+//! Colouring algorithms.
+
 use bytemuck::{Pod, Zeroable};
 use fnv::{FnvHashMap, FnvHashSet};
 use log::trace;
@@ -5,6 +7,7 @@ use rayon::prelude::{IndexedParallelIterator, IntoParallelRefMutIterator, Parall
 
 use crate::{pixel::Pixel, screen};
 
+/// [`bytemuck`]-compatible colour output for a single pixel.
 #[repr(C)]
 #[derive(Pod, Zeroable, Clone, Copy, Debug)]
 pub struct ColourRange {
@@ -21,6 +24,7 @@ impl Default for ColourRange {
     }
 }
 
+/// Histogram-based colouring algorithm ([Wikipedia](https://en.wikipedia.org/wiki/Plotting_algorithms_for_the_Mandelbrot_set#Histogram_coloring)).
 pub struct HistogramColouring {
     total_samples: usize,
     bucket_labels: Vec<u32>,
@@ -49,6 +53,7 @@ impl HistogramColouring {
         self.histogram_ranges.clear();
     }
 
+    /// Update the colour output (`colour_ranges`) given some newly escaped pixels (`newly_escaped_pixels`).
     pub fn update_colours(
         &mut self,
         screen_size: screen::Size,
